@@ -1,22 +1,25 @@
 import { Module } from '@nestjs/common';
-import { createObserveModule } from '@nestjs/observe';
-import { AppController } from './app.controller.js';
-import { AppService } from './app.service.js';
+import { ConfigModule } from '@nestjs/config';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 
-export const { ObserveModule, ObserveInstrument } = createObserveModule();
+import { envSchema } from './config/env.js';
+
+import { RequestLoggingInterceptor } from './logger/request-logging.interceptor.js';
+
+import { DrizzleModule } from './db/drizzle/drizzle.module.js';
 
 @Module({
   imports: [
-    // Distributed tracing, auto-correlated logs, request/job metrics, error
-    // telemetry, alarms, and more — out of the box. Sign up at https://observe.nestjs.com
-    ObserveModule.forRoot({
-      appKey: process.env.OBSERVE_APP_KEY ?? '',
-      appSecret: process.env.OBSERVE_APP_SECRET ?? '',
-      runtimeMetrics: !Boolean(process.versions?.['webcontainer']),
-      serviceId: 'nest-typescript-starter',
+    ConfigModule.forRoot({
+      isGlobal: true,
+      ignoreEnvFile: true,
+      validationSchema: envSchema,
     }),
+    DrizzleModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
+  controllers: [],
+  providers: [
+    { provide: APP_INTERCEPTOR, useClass: RequestLoggingInterceptor },
+  ],
 })
 export class AppModule {}
