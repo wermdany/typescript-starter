@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
 
 import { queryUsersSchema } from '../../modules/user/dto/query-users.dto.js';
+import { DEFAULT_VALIDATION_MESSAGE } from '../response/api-response.js';
 import { trimmedShape } from '../validation/trimmed.js';
 import { ZodValidationPipe } from './zod-validation.pipe.js';
 
@@ -161,6 +162,31 @@ describe('ZodValidationPipe 校验失败契约', () => {
       message: '参数校验失败',
       errors: [{ path: 'nickname', message: expect.stringContaining('>=1') }],
     });
+  });
+
+  it('默认 message 取自 DEFAULT_VALIDATION_MESSAGE（改常量即全局生效）', () => {
+    const pipe = new ZodValidationPipe(schema);
+    expect(
+      catchResponse(() => pipe.transform({ nickname: '' }, BODY)).message,
+    ).toBe(DEFAULT_VALIDATION_MESSAGE);
+  });
+
+  it('可按参数自定义校验失败文案（表单类接口常用）', () => {
+    const pipe = new ZodValidationPipe(schema, {
+      message: '注册信息有误，请检查后重试',
+    });
+    expect(
+      catchResponse(() => pipe.transform({ nickname: '' }, BODY)).message,
+    ).toBe('注册信息有误，请检查后重试');
+  });
+
+  it('自定义文案不影响字段级 errors（前端绑定表单仍靠 errors）', () => {
+    const pipe = new ZodValidationPipe(schema, { message: '提交有误' });
+    expect(
+      catchResponse(() => pipe.transform({ nickname: '' }, BODY)).errors,
+    ).toEqual([
+      { path: 'nickname', message: expect.stringContaining('>=1') },
+    ]);
   });
 });
 

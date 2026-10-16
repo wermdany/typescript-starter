@@ -87,7 +87,7 @@ describe('HttpExceptionFilter 的日志分工', () => {
     // 4xx 是调用方问题：access 行（warn）已留痕，这里重复记只会淹没真 bug
     expect(output).not.toContain('参数校验失败');
     expect(res.json).toHaveBeenCalledWith({
-      code: 400,
+      success: false,
       message: '参数校验失败',
       data: null,
       errors: [{ path: 'nickname', message: '必填' }],
@@ -138,7 +138,7 @@ describe('HttpExceptionFilter 的日志分工', () => {
     expect(output).toContain('at ');
     // 对外仍不泄漏内部细节
     expect(res.json).toHaveBeenCalledWith({
-      code: 500,
+      success: false,
       message: '服务器内部错误',
       data: null,
     });
@@ -156,7 +156,7 @@ describe('HttpExceptionFilter 的日志分工', () => {
     expect(failureOf(res).summary).toBe('内部故障');
     expect(output).toContain('内部故障');
     expect(res.json).toHaveBeenCalledWith({
-      code: 500,
+      success: false,
       message: '内部故障',
       data: null,
     });
@@ -180,5 +180,50 @@ describe('HttpExceptionFilter 的日志分工', () => {
     );
 
     expect(failureOf(res).fields).toHaveLength(4);
+  });
+});
+
+describe('HttpExceptionFilter 的响应体契约（success 判别）', () => {
+  it('业务失败：success:false + data:null，且已不带 legacy code 字段', () => {
+    const res = makeRes();
+    new HttpExceptionFilter().catch(
+      new NotFoundException('用户不存在'),
+      makeHost(res),
+    );
+
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      message: '用户不存在',
+      data: null,
+    });
+    // code 曾同时承载「成功 0」与「失败 HTTP 状态」两个尺度，已由 success 取代
+    expect(res.json.mock.calls[0]?.[0]).not.toHaveProperty('code');
+  });
+
+  it('业务失败不带 errors（只有参数校验失败才带）', () => {
+    const res = makeRes();
+    new HttpExceptionFilter().catch(
+      new ConflictException('学号已存在'),
+      makeHost(res),
+    );
+
+    expect(res.json.mock.calls[0]?.[0]).not.toHaveProperty('errors');
+  });
+
+  it('失败体的 HTTP 状态码与 body 的 success:false 始终一致（不变量）', () => {
+    for (const exception of [
+      new BadRequestException('参数校验失败'),
+      new NotFoundException('用户不存在'),
+      new ConflictException('学号已存在'),
+      new InternalServerErrorException('内部故障'),
+    ]) {
+      const res = makeRes();
+      new HttpExceptionFilter().catch(exception, makeHost(res));
+      const [body] = res.json.mock.calls[0] as [{ success: boolean }];
+      expect(body.success).toBe(false);
+      expect(res.status).toHaveBeenCalledWith(exception.getStatus());
+      expect(exception.getStatus()).toBeGreaterThanOrEqual(400);
+    }
   });
 });

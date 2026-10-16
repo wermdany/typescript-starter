@@ -11,7 +11,14 @@
   - 本地覆盖用 `.env.local`（gitignore），敏感配置由部署平台注入
 ## 业务模块约定（2026-10-15 起，User 模块为首个范式）
 - 目录：业务模块放 `src/modules/<domain>/`（module/controller/service/mapper/dto），通用件放 `src/common/`
-- 响应契约：全局统一 `{ code, message, data }`——成功 `code:0`（`@ApiMessage` 可覆盖 message）；失败 `{ code: httpStatus, message: 简短原因, data: null }`，**参数校验失败额外带 `errors: [{path, message}]`**（zod issues 映射而非透传）；`@SkipTransform()` 可跳过包装；契约类型在 `src/common/response/api-response.ts`
+- **响应契约（2026-10-16 改为 `success` 判别，详见 AGENTS.md §5）**
+  - 成功 `{ success: true, message: <默认 'ok' | @ApiMessage>, data }`；失败 `{ success: false, message: <短文案>, data: null }`，**参数校验失败额外带 `errors: [{path, message}]`**（zod issues 映射而非透传）
+  - **`code` 字段已删除**：它曾同时承载"成功 0"与"失败 HTTP 状态"两个尺度（RFC 9457 明确反对复用状态码当业务码，`{"code":402}` 没提供状态行之外的信息）；换成布尔 `success` 后语义无歧义、不与状态码抢位置，且成为 TS **判别联合** `ApiResponse<T> = ApiSuccess<T> | ApiFailure`
+  - ⚠️ **不变量：`success === (HTTP 状态码 2xx)`**，绝不允许 `200 + success:false`（会同时废掉重试策略/网关规则/错误率监控）
+  - **`message` 是给用户看的 toast 文案**（用户明确要求"错误 message 应该直接给用户读取的 toast 信息"）：客户端**禁止**按 message 字符串分支（只能靠 `success`/HTTP 状态码/`errors[].path`）；服务端只有中文、不 i18n；**改文案不算契约变更**
+  - 文案自定义入口：校验失败 `new ZodValidationPipe(schema, { message: '…' })`（默认 `DEFAULT_VALIDATION_MESSAGE`「参数校验失败」）；成功默认 `DEFAULT_SUCCESS_MESSAGE`（`'ok'`）。两个常量都在 `src/common/response/api-response.ts`，改常量即全局生效
+  - **无返回值接口保持 200 + `data:null`，不改 204**（判别字段 `success` 在 body 里，204 无 body 会让前端失去唯一判据）；`@SkipTransform()` 仍是明确例外（其响应体不是契约 JSON）
+  - 选型过程：对比过 A 收敛信封 / B 裸资源+RFC 9457 / C 轻信封 data+meta，用户选择"保留信封但去 code、换 success、message 当 toast"。分页元数据 `items/total/page/pageSize/totalPages` **保持现状不动**
 - 请求校验：zod v4 + `ZodValidationPipe` **按参数注册**（`@Body(new ZodValidationPipe(schema))`），不用 class-validator
 - **入参归一化：只有 URL query 宽容（2026-10-16 重定契约）**——`ZodValidationPipe.transform(value, metadata)` 读 Nest 给的 `metadata.type`，**仅 `type === 'query'` 时**把 `''`/纯空白 → `undefined`（→ optional 通过、default 回落）；`@Body`/`@Param` **原样进 schema、不做任何空值宽恕**，注册处零改动。
   - 用户要求：「清空现在空串/null 过滤，制定契约必须由前端处理；如果参数在 url query 则做处理」

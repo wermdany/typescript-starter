@@ -17,12 +17,17 @@ import type { FieldError } from '../response/api-response.js';
 
 /**
  * 全局异常过滤器：把所有异常统一转换为响应契约的失败格式
- * `{ code: <httpStatus>, message: <简短失败原因>, data: null }`。
+ * `{ success: false, message: <短原因>, data: null }`（契约见 api-response.ts）。
  *
- * - 参数校验失败（400，含 ZodValidationPipe 抛出的）：message 固定「参数校验失败」，
+ * **不变量：`success` 必须与 HTTP 状态码一致**（4xx/5xx 一律 `false`），
+ * 绝不允许出现 2xx + `success: false`。
+ *
+ * - 参数校验失败（400，含 ZodValidationPipe 抛出的）：message 取异常体里的文案
+ *   （默认 `DEFAULT_VALIDATION_MESSAGE` =「参数校验失败」，可按参数覆盖），
  *   `errors` 数组透传字段级详情（`{ path, message }`）
  * - 业务失败（404/409 等）：message 为异常的自描述短原因，无 `errors` 字段
- * - 未知异常：固定 `{ code: 500, message: '服务器内部错误', data: null }`，堆栈仅写服务端日志
+ * - 未知异常：固定 `{ success: false, message: '服务器内部错误', data: null }`，
+ *   堆栈仅写服务端日志
  *
  * `@Catch()` 无参全量捕获，因此 Nest 内置的 body 解析失败（400，`adapter.mapException`
  * 会把 body-parser 的 SyntaxError 映射成 BadRequestException）等也走同一契约。
@@ -87,12 +92,12 @@ export class HttpExceptionFilter implements ExceptionFilter {
     }
 
     const payload: {
-      code: number;
+      success: false;
       message: string;
       data: null;
       errors?: FieldError[];
     } = {
-      code: status,
+      success: false,
       message,
       data: null,
     };

@@ -67,7 +67,7 @@ src/
 │   ├── interceptors/transform.interceptor.ts # 全局成功契约包装
 │   ├── pagination/               #   paginationSchema + paginate() + PageResponse
 │   ├── pipes/zod-validation.pipe.ts       # 按参数注册的 zod 校验管道（query 空值宽容 / body 严格）
-│   ├── response/api-response.ts  #   ★ 响应契约类型（ApiResponse / FieldError）
+│   ├── response/api-response.ts  #   ★ 响应契约类型（ApiSuccess/ApiFailure/FieldError + 默认文案常量）
 │   └── startup/local-addresses.ts #   启动时枚举可访问地址（回环 + 局域网 IPv4）
 ├── db/
 │   ├── drizzle/                  #   DrizzleModule(@Global) + DrizzleService
@@ -138,34 +138,56 @@ pnpm db:studio        # 可视化查看数据
 
 ---
 
-## 5. 响应契约（全局统一）
+## 5. 响应契约（全局统一，`success` 判别）
 
-**所有** HTTP 响应（含 404/500）都经过全局拦截器/过滤器，形态统一为
-`{ code, message, data }`，契约类型见 `src/common/response/api-response.ts`。
+**所有** HTTP 响应（含 404/500）都经过全局拦截器/过滤器，形态统一，
+契约类型见 `src/common/response/api-response.ts`。
 
-**成功**（`code: 0`，由 `TransformInterceptor` 包装）：
+**成功**（`success: true`，由 `TransformInterceptor` 包装）：
 
 ```json
-{ "code": 0, "message": "ok", "data": { "id": 1, "nickname": "小明" } }
+{ "success": true, "message": "创建成功", "data": { "id": 1, "nickname": "小明" } }
 ```
 
-- message 默认 `'ok'`，用 `@ApiMessage('创建成功')` 覆盖
-- handler 返回 `undefined`/`null` 时 `data` 归一为 `null`
-- 健康检查、文件下载等特殊端点用 `@SkipTransform()` 跳过包装
+- `message` **恒有值**：默认 `DEFAULT_SUCCESS_MESSAGE`（`'ok'`），`@ApiMessage('创建成功')` 覆盖
+- 无返回值的操作（如重置密码）`data` 为 `null` —— **不要改成 204**，判别字段在 body 里
+- 健康检查、文件下载等特殊端点用 `@SkipTransform()` 跳过包装。这是**明确的例外**：
+  这些响应体不是契约 JSON，前端也不能按 `success` 判别
 
-**失败**（`code` = HTTP 状态码，`data: null`，由 `HttpExceptionFilter` 统一转换）：
+**失败**（`success: false`，由 `HttpExceptionFilter` 统一转换）：
 
 ```json
-{ "code": 400, "message": "参数校验失败", "data": null,
+{ "success": false, "message": "参数校验失败", "data": null,
   "errors": [{ "path": "email", "message": "Invalid email address" }] }
 ```
 
-- **参数校验失败（400）**：`message` 固定「参数校验失败」，额外带 `errors: [{ path, message }]`
-  —— 由 zod `issues` **映射**而来（不是透传 zod 原始结构），字段路径用点号（`address.city`），根级为空串
+- **参数校验失败（400）**：`message` 默认 `DEFAULT_VALIDATION_MESSAGE`（「参数校验失败」），
+  可按参数覆盖：`@Body(new ZodValidationPipe(schema, { message: '注册信息有误，请检查后重试' }))`；
+  额外带 `errors: [{ path, message }]` —— 由 zod `issues` **映射**而来（不是透传 zod 原始结构），
+  字段路径用点号（`address.city`），根级为空串
 - **业务失败（404/409 等）**：`message` 为自描述短原因（如「用户不存在」「学号已存在」），**无** `errors`
 - **未知异常（500）**：`message` 固定「服务器内部错误」，堆栈只写服务端日志，**不泄漏给客户端**
 - 新增错误场景请抛 `HttpException` 子类（`NotFoundException` / `ConflictException`…），
   不要在 Controller 里手写响应对象
+
+### 两条硬性不变量（破坏它等于废掉客户端）
+
+1. **`success === (HTTP 状态码为 2xx)`**。绝不允许出现 `200` + `success: false` ——
+   那会同时废掉重试策略、网关规则与错误率监控，并逼客户端"先解析才知道成败"。
+   过滤器是唯一出口，新增响应路径（自定义 filter、直接操作 `res`）时必须守住这条
+2. **`message` 是"给人看的"，不是机器判据**。它会被直接 toast，因此：
+   - 客户端**禁止** `if (message === '学号已存在')` 这类分支（改文案会静默破坏逻辑），
+     分支只能靠 `success` / HTTP 状态码 / `errors[].path`
+   - 服务端只有中文、不做 i18n（多语言由前端自行映射）
+   - 由此**改文案不算契约变更**，但改 `success` 语义/字段名是破坏性变更
+
+### 为什么没有 `code`（历史决策，不要加回来）
+
+早期版本是 `{ code, message, data }`：成功时 `code: 0`、失败时 `code: <HTTP 状态>`。
+一个字段承载两个不同尺度，文档必须专门解释，且与 HTTP 状态码完全重复 ——
+RFC 9457 明确反对复用状态码当业务错误码（"`{"code": 402}` adds nothing the status line
+did not already say"）。2026-10-16 换成布尔 `success`：语义无歧义、不与状态码抢位置，
+并让成功/失败成为 TS 的**判别联合** `ApiResponse<T>`（用 `success` 收窄，前端可穷尽检查）。
 
 ---
 
@@ -484,6 +506,9 @@ const result = await paginate(
      应正常返回列表（空值视为未提供）；body 侧严格 ——
      `curl -X POST .../users -d '{"studentNo":"20250001","email":"a@b.com","nickname":"","password":"12345678"}'`
      应 400 且 `errors[].path` 指向 `nickname`（**不是**被吞成"未提供"）
+   - **响应契约（第 5 节）**：成功体必须是 `success:true` 且 HTTP 为 2xx；
+     失败体必须 `success:false` + `data:null`；两者都**不应出现** `code` 字段；
+     400 带 `errors[]`、404/409 不带
    - **失败行数要对**：4xx 命中路由应**只有 1 行**（access `warn`，**不应**再有 `HttpExceptionFilter`
      的 4xx 行）；5xx 应**恰好 2 行**（过滤器堆栈行在前 → access `error` 行在后，两者 traceId 相同）；
      404 未命中路由、malformed JSON 的 400 也应有 access 行且**带耗时**
@@ -540,6 +565,14 @@ const result = await paginate(
   写日志时 `runWithTraceId(traceId, …)` 显式恢复（见第 10 节）
 - **access 行的耗时口径**：从**中间件入口**算到响应收尾，包含 body 解析 / 守卫 / 校验 / 序列化，
   因此比旧实现（从拦截器算起）的数字略大。与历史日志对比时会看到这个台阶，属预期
+- **`success` 与 HTTP 状态码必须同向**：`success === (2xx)`。过滤器是唯一失败出口，
+  新增响应路径（自定义 filter、直接操作 `res`、第三方中间件短路）时务必不要产出
+  `200 + success:false` —— 那会废掉重试/网关/监控三件事
+- **无返回值接口不要改成 204**：判别字段 `success` 在 body 里，204 无 body 会让前端
+  失去唯一判据。保持 `200 + { success: true, message: '密码已重置', data: null }`
+- **`message` 不是机器判据**：它是给用户看的 toast 文案，客户端不得字符串匹配、
+  服务端不保证稳定；分支一律靠 `success` / HTTP 状态码 / `errors[].path`
+- **契约里已经没有 `code` 字段**：见到 `code` 说明是遗留代码或新写的旧风格（第 5 节）
 - **`src/modules/user/user.e2e-spec.ts` 尚未编写**：计划用独立测试库 `learn_nest_test` + 自动迁移 +
   `TRUNCATE` 隔离，断言按第 5 节的响应契约写
 - 旧的 `test/app.e2e-spec.ts` 与 `test/` 目录已删除（`GET /` 期望 Hello World 的断言已过时），

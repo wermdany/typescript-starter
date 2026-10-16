@@ -7,6 +7,7 @@ import {
 import { z, type ZodType } from 'zod';
 
 import type { FieldError } from '../response/api-response.js';
+import { DEFAULT_VALIDATION_MESSAGE } from '../response/api-response.js';
 
 /**
  * URL query 空值归一化：把「没有值」的 query 参数归一化为 `undefined`。
@@ -57,6 +58,26 @@ function normalizeQueryValue(value: unknown): unknown {
   return result;
 }
 
+/** 管道可选项 */
+export interface ZodValidationPipeOptions {
+  /**
+   * 校验失败时对外返回的 message 文案。
+   *
+   * 默认取 {@link DEFAULT_VALIDATION_MESSAGE}（「参数校验失败」）——该文案会直接
+   * 展示给用户，因此按接口覆盖是常见需求，例如表单类接口用更具体的说法：
+   *
+   * ```ts
+   * create(
+   *   @Body(new ZodValidationPipe(createUserSchema, { message: '注册信息有误，请检查后重试' }))
+   *   dto: CreateUserDto,
+   * ) {}
+   * ```
+   *
+   * 字段级细节始终保留在 `errors[]` 里，不受本项影响。
+   */
+  message?: string;
+}
+
 /**
  * 通用 zod 校验管道（按参数注册）。
  *
@@ -66,7 +87,8 @@ function normalizeQueryValue(value: unknown): unknown {
  * 设计说明：zod 管道天然是"有参管道"（需携带各自 schema），
  * 无法像 ValidationPipe 那样无参全局注册，因此刻意保持显式按参数注册，
  * 校验失败时抛出 400，由全局 HttpExceptionFilter 统一转换为响应契约：
- * message 为简短的「参数校验失败」，字段级详情映射进 errors 数组。
+ * message 取 {@link ZodValidationPipeOptions.message}（默认「参数校验失败」），
+ * 字段级详情映射进 errors 数组。
  *
  * ## 入参归一化：只对 URL query 生效
  *
@@ -82,7 +104,10 @@ function normalizeQueryValue(value: unknown): unknown {
 export class ZodValidationPipe<S extends ZodType>
   implements PipeTransform<unknown, z.output<S>>
 {
-  constructor(private readonly schema: S) {}
+  constructor(
+    private readonly schema: S,
+    private readonly options: ZodValidationPipeOptions = {},
+  ) {}
 
   transform(value: unknown, metadata?: ArgumentMetadata): z.output<S> {
     const input =
@@ -94,7 +119,10 @@ export class ZodValidationPipe<S extends ZodType>
         path: issue.path.join('.'),
         message: issue.message,
       }));
-      throw new BadRequestException({ message: '参数校验失败', errors });
+      throw new BadRequestException({
+        message: this.options.message ?? DEFAULT_VALIDATION_MESSAGE,
+        errors,
+      });
     }
     return result.data;
   }
