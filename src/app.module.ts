@@ -23,7 +23,9 @@ import { UserModule } from './modules/user/user.module.js';
   ],
   controllers: [],
   providers: [
-    // 拦截器顺序：RequestLogging 保持最外层，Transform 紧随其后（日志统计完整耗时）
+    // 拦截器顺序不再影响日志正确性：access 行已迁到中间件层（accessLogMiddleware），
+    // 耗时从中间件入口算到响应结束，天然包含 handler + Transform。
+    // RequestLoggingInterceptor 仍需保留，但它只剩「body 行」一个职责。
     { provide: APP_INTERCEPTOR, useClass: RequestLoggingInterceptor },
     { provide: APP_INTERCEPTOR, useClass: TransformInterceptor },
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
