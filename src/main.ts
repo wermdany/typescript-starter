@@ -1,11 +1,16 @@
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
+import { z } from 'zod';
+import { zhCN } from 'zod/locales';
+
 import { AppModule } from './app.module.js';
 import { FileLogger } from './logger/file-logger.js';
 import { getLogLevels } from './logger/log-levels.js';
 import type { Env } from './config/env.js';
 
 import './config/env.js';
+
+z.config(zhCN());
 
 async function bootstrap() {
   // create 阶段：屏蔽启动噪音但保留框架错误/警告（不要 logger: false，会静默致命错误）

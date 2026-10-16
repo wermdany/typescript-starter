@@ -8,6 +8,13 @@
       "when": 1792052648530,
       "tag": "0000_rare_hercules",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792077351827,
+      "tag": "0001_seed_users",
+      "breakpoints": true
     }
   ]
 }
