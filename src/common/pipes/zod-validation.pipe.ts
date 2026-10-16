@@ -1,30 +1,44 @@
 import {
   BadRequestException,
   Injectable,
-  PipeTransform,
+  type ArgumentMetadata,
+  type PipeTransform,
 } from '@nestjs/common';
 import { z, type ZodType } from 'zod';
 
 import type { FieldError } from '../response/api-response.js';
 
 /**
- * 把「空串」与「显式 null」归一化为 undefined（即"未提供"）。
+ * URL query 空值归一化：把「没有值」的 query 参数归一化为 `undefined`。
  *
- * 约定（社区主流做法，对齐 GMO 银行等生产规约：缺省 / 空串 / null 三态统一）：
- * - `''`（空字符串）与 `null` 一律视为「未提供该字段」，等价于不传
- * - 纯空白字符串（`' '`、`'\t'`）**不**在此处理——文本字段的首尾空白由
- *   schema 层的 `trimmed()`（`src/common/validation/trimmed.ts`）按字段声明，
- *   trim 后为空时同样落到"未提供"。两层分工：管道管"空值语义"，schema 管"文本规范化"
- * - 仅递归处理**普通对象**（query / body 的层级结构）；数组元素原样保留
- *   （数组内的空串、null 多为有意为之，如标签列表、批量操作占位）；
- *   顶层字符串（如 `:param` 路径参数）也不受影响，需要时由对应 schema 自行 `trimmed`
- * - 其他类型（string / number / boolean / Date / Buffer…）原样返回
+ * ## 为什么只有 query 需要这一步
  *
- * 归一化后交给领域 schema：optional 字段自然通过，required 字段报
- * 「expected string, received undefined」——必填缺失语义比「min 1」更准确，
- * 因此**无需为任何 DTO 单独加空值包装**。
+ * URL 的值是**字符串装配的产物**——浏览器表单、`URLSearchParams`、`?a=` 这类写法
+ * 都无法表达"这个键不存在"，清空的输入框天然就是 `?keyword=`。这是**传输层假象**，
+ * 不代表调用方想传一个空字符串，宽容掉不会丢失任何语义。
+ *
+ * JSON body 则相反，它**天然能表达缺席**（省略 key 即可），于是：
+ *
+ * - `null` 是显式语义（RFC 7396 / JSON Merge Patch：`null` = 删除该字段）
+ * - `""` 是长度为 0 的**真实值**
+ * - 只有"键缺席"才等于"没有提供"
+ *
+ * 把 body 里的 `null` / `''` 吞成"未提供"会让 PATCH 无法表达"清空某字段"，
+ * 也会把"显式置空"与"前端忘了传"混为一谈（前端契约要求请求体必须干净，
+ * 见 AGENTS.md 第 6 节）。因此 body / param 一律**原样**进 schema。
+ *
+ * ## 归一化范围
+ *
+ * - `''` 与**纯空白字符串**（`' '`、`'\t'`、全角空格）→ `undefined`
+ *   （query 的空白没有信息量：`?keyword=%20%20` 等价于没传）
+ * - 仅递归**普通对象**；**数组元素不动**（数组内的空串多为有意占位，如多选筛选）
+ * - 其他类型（number / boolean…）原样返回
  */
-function emptyishToUndefined(value: unknown): unknown {
+function normalizeQueryValue(value: unknown): unknown {
+  if (typeof value === 'string') {
+    return value.trim() === '' ? undefined : value;
+  }
+
   // 仅处理普通对象（排除数组、null、Date、Buffer、类实例等）
   if (
     typeof value !== 'object' ||
@@ -38,8 +52,7 @@ function emptyishToUndefined(value: unknown): unknown {
   const source = value as Record<string, unknown>;
   const result: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(source)) {
-    result[key] =
-      item === '' || item === null ? undefined : emptyishToUndefined(item);
+    result[key] = normalizeQueryValue(item);
   }
   return result;
 }
@@ -55,8 +68,15 @@ function emptyishToUndefined(value: unknown): unknown {
  * 校验失败时抛出 400，由全局 HttpExceptionFilter 统一转换为响应契约：
  * message 为简短的「参数校验失败」，字段级详情映射进 errors 数组。
  *
- * 入参归一化：校验前先执行 {@link emptyishToUndefined}，
- * 把空串与显式 null 视为"未提供"，避免前端表单/URL 传空值触发无意义的 400。
+ * ## 入参归一化：只对 URL query 生效
+ *
+ * 管道从 Nest 传入的 {@link ArgumentMetadata} 读取参数来源（框架给的事实，不是猜测），
+ * **仅当 `metadata.type === 'query'` 时**执行 {@link normalizeQueryValue}；
+ * `@Body` / `@Param` 收到的值原样进入 schema。
+ *
+ * 这样调用点不需要任何额外声明——`@Query(new ZodValidationPipe(schema))` 自动宽容、
+ * `@Body(...)` 自动严格，新增路由不会漏写标记（社区管道同样按来源分流）。
+ * 理由与前端契约见 {@link normalizeQueryValue} 及 AGENTS.md 第 6 节。
  */
 @Injectable()
 export class ZodValidationPipe<S extends ZodType>
@@ -64,8 +84,11 @@ export class ZodValidationPipe<S extends ZodType>
 {
   constructor(private readonly schema: S) {}
 
-  transform(value: unknown): z.output<S> {
-    const result = this.schema.safeParse(emptyishToUndefined(value));
+  transform(value: unknown, metadata?: ArgumentMetadata): z.output<S> {
+    const input =
+      metadata?.type === 'query' ? normalizeQueryValue(value) : value;
+
+    const result = this.schema.safeParse(input);
     if (!result.success) {
       const errors: FieldError[] = result.error.issues.map((issue) => ({
         path: issue.path.join('.'),

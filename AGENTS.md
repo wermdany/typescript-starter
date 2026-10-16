@@ -66,7 +66,7 @@ src/
 │   ├── filters/http-exception.filter.ts   # 全局异常 → 失败契约
 │   ├── interceptors/transform.interceptor.ts # 全局成功契约包装
 │   ├── pagination/               #   paginationSchema + paginate() + PageResponse
-│   ├── pipes/zod-validation.pipe.ts       # 按参数注册的 zod 校验管道
+│   ├── pipes/zod-validation.pipe.ts       # 按参数注册的 zod 校验管道（query 空值宽容 / body 严格）
 │   ├── response/api-response.ts  #   ★ 响应契约类型（ApiResponse / FieldError）
 │   └── startup/local-addresses.ts #   启动时枚举可访问地址（回环 + 局域网 IPv4）
 ├── db/
@@ -169,7 +169,7 @@ pnpm db:studio        # 可视化查看数据
 
 ---
 
-## 6. 请求校验与入参归一化
+## 6. 请求校验与前端契约
 
 zod 管道是"有参管道"，**按参数显式注册**（不存在全局 ValidationPipe）：
 
@@ -179,27 +179,58 @@ create(@Body(new ZodValidationPipe(createUserSchema)) dto: CreateUserDto) {}
 findOne(@Param('id', new ZodValidationPipe(idParamSchema)) id: IdParam) {}
 ```
 
-**入参归一化（管道层统一，DTO 无需关心）**：校验前，query/body 中的
+### 请求体（body）契约：必须"干净"，后端不做空值宽恕
 
-- `''`（空串）与显式 `null` → 一律视为「**未提供**」（→ `undefined`）
-- 纯空白字符串（`' '`、`'\t'`）**不算空**，仍按原值校验（trim 属业务语义，不在管道代劳）
-- 仅递归处理**普通对象**；**数组元素不动**（数组内空串多为有意占位）
+**JSON body 原样进 schema**（只去掉文本字段的首尾空白），**不把空值转成"未提供"**：
 
-效果：optional 字段自然通过、default 字段回落默认值、required 字段报
-「expected string, received undefined」（比 `min(1)` 语义更准确）。
-**因此不要为任何 DTO 额外加"空值包装"**，领域 schema 保持严格。
+| 前端想表达 | 正确写法 | 会被 400 的写法 |
+| --- | --- | --- |
+| 不提供该字段 | **省略这个 key** | `"keyword": ""`、`"keyword": null` |
+| 提供空字符串 | ——（文本字段不接受空值，`min(1)` 会拒） | —— |
+
+- `""` / 纯空白 → 由字段自身约束报 400（`Too small: expected string to have >=1 characters`）
+- `null` → 报 `received null`
+- **依据（RFC 7396 / JSON Merge Patch）**：JSON 里 `null` 是**显式语义**（"删除该字段"）、
+  `""` 是长度为 0 的**真实值**，只有"键缺席"才等于"没有值"。把 `null` / `""` 吞成"未提供"
+  会让 PATCH 无法表达"清空某字段"，也把"显式置空"与"前端忘了传"混为一谈
+- 因此**不要**再引入任何"空值包装"（在 `preprocess` / `transform` 里把空值转 `undefined`）——
+  schema 层保持**严格且与来源无关**
+
+### URL query：唯一的宽容通道（管道按来源自动判定）
+
+管道从 Nest 传入的 `ArgumentMetadata.type` 读**参数来源**（框架给的事实，不是猜测），
+**仅当 `type === 'query'`** 时把空值归一化为「未提供」：
+
+- `''` 与**纯空白字符串**（`' '`、`'\t'`）→ `undefined`：optional 字段通过、default 回落默认值
+- **为什么只对 query 宽容**：URL 的值是**字符串装配的产物**——浏览器表单、`URLSearchParams`
+  无法表达"这个键不存在"（清空的输入框天生就是 `?keyword=`），这是**传输层假象**而非调用方意图，
+  宽容掉不丢语义；而 JSON body 天然能表达缺席，宽容只会掩盖前端 bug
+- 仅递归**普通对象**；**数组元素不动**（数组内空串多为有意占位，如多选筛选）
+- **调用点零改动**：`@Query(new ZodValidationPipe(schema))` 自动宽容，`@Body(...)` / `@Param(...)`
+  自动严格 —— 注册处不需要写任何标记，新增路由不会漏写（社区管道同样按来源分流）
+
+### 首尾空白与路径参数
+
+- `trimmedShape({...})` 仍是 DTO 的**默认写法**：自动给每个顶层字段去掉首尾空白
+  （非字符串字段透传、无副作用）；例外字段就近写 `.meta({ keepWhitespace: true })`（目前只有 `password`）
+- **`trimmed` 只 trim，不产出 `undefined`** —— trim 后为空就保持空串，交给字段自身的 `min(1)` 判定。
+  历史版本曾在 schema 层做"trim 后为空 → 未提供"，已废弃：那让同一份 schema 无法区分"谁在宽容"，
+  也把 body 的空串一并吞掉了
+- 只处理**顶层字段**；嵌套对象（如 `address`）在其定义处自行包一层 `z.object(trimmedShape({...}))`；
+  数组元素不处理
+- `trimmed(schema)` 用于**顶层非 shape** 场景（`:id` / `:studentNo` 路径参数）——路径参数是顶层字符串，
+  query 归一化与 shape 包装都覆盖不到它，两个方向都要显式处理（都在 `reset-password.dto.ts`）：
+  - 文本类 `:studentNo` → `trimmed(studentNoSchema)`
+  - 数字类 `:id` → `trimmed(z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().positive()))`：
+    **不能**只用 `z.coerce.number()`——`Number('') === 0` 会把空值误报成
+    `Too small: expected number to be >0`（看不出"没传"还是"传了 0"），且 `Number()` 会把 `'0x10'`
+    解析成 16、`'1e0'` 解析成 1；`/^\d+$/` 前置收紧后再 `.pipe()` 保留数字域校验
+    （`'0'` → `>0`，超安全整数 → `Too big`）
 
 其他规则：
 
 - HTTP query 天然是字符串，数字字段一律 `z.coerce.number()`
 - 路径参数 schema 复用（如 `idParamSchema` 供全部 `:id` 路由使用）
-- **路径参数是顶层字符串，管道层的"空串归一化"覆盖不到它**（管道只递归普通对象），
-  两个方向都要显式处理，参考现有两个 schema（都在 `reset-password.dto.ts`）：
-  - 文本类 `:studentNo` → `trimmed(studentNoSchema)`
-  - 数字类 `:id` → `trimmed(z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().positive()))`：
-    套 `trimmed` 让空白值落到「未提供」语义，**不能**只用 `z.coerce.number()`——`Number('') === 0`
-    会把"没传"误报成 `Too small: expected number to be >0`，且 `Number()` 会把 `'0x10'` 解析成 16、
-    `'1e0'` 解析成 1；`.pipe()` 保留数字域校验（`'0'` → `>0`，超安全整数 → `Too big`）
 - 数字 ID 是**数据库生成、不接受客户端指定**，因此 schema 只管"是不是合法正整数"，
   不额外约束业务范围（如 int4 上限）
 - 更新类 DTO 需保证"至少提供一个字段"，用 `.refine((v) => Object.keys(v).length > 0, ...)`
@@ -449,6 +480,10 @@ const result = await paginate(
    - 涉及 `LOG_BODY` 时对比开关前后：`curl -X POST ... -d '{...}'` 后
      `grep 'body:' logs/app.log`（关闭时无输出，开启时有且敏感字段为 `***`）
    - 入站透传：`curl -H 'x-trace-id: abc-123' ...`，日志与响应头都应出现 `abc-123`
+   - **入参宽容边界（第 6 节契约）**：query 侧宽容 —— `curl '.../users?page=&pageSize=&keyword='`
+     应正常返回列表（空值视为未提供）；body 侧严格 ——
+     `curl -X POST .../users -d '{"studentNo":"20250001","email":"a@b.com","nickname":"","password":"12345678"}'`
+     应 400 且 `errors[].path` 指向 `nickname`（**不是**被吞成"未提供"）
    - **失败行数要对**：4xx 命中路由应**只有 1 行**（access `warn`，**不应**再有 `HttpExceptionFilter`
      的 4xx 行）；5xx 应**恰好 2 行**（过滤器堆栈行在前 → access `error` 行在后，两者 traceId 相同）；
      404 未命中路由、malformed JSON 的 400 也应有 access 行且**带耗时**
@@ -465,9 +500,16 @@ const result = await paginate(
 - **`timestamps()` 是函数**：写成共享对象常量会导致多表列名错乱
 - **`updatedAt` 不自动更新**：所有 update 手动 set
 - **路由顺序**：静态段（`by-student-no/:studentNo`）必须在 `:id` 之前声明
-- **路径参数**：不是 shape，管道层"空串归一化"覆盖不到 —— 文本类套 `trimmed()`，数字类用
-  `z.string().regex(/^\d+$/).transform(Number).pipe(z.number()...)`，不要用 `z.coerce.number()`
-  （`Number('') === 0` 会把空白值误报成 `too_small`）→ 见第 6 节
+- **路径参数**：不是 shape，管道层的 query 归一化与 shape 包装都覆盖不到 —— 文本类套 `trimmed()`，
+  数字类用 `z.string().regex(/^\d+$/).transform(Number).pipe(z.number()...)`，不要用 `z.coerce.number()`
+  （`Number('') === 0` 会把空值误报成 `too_small`）→ 见第 6 节
+- **空值宽容只发生在 query**：body 里的 `""` / 纯空白 / `null` 一律**如实校验**
+  （`min(1)` 或类型错误），这是前端契约的一部分。若发现某个 body 参数"传空串被静默忽略"，
+  说明有人又加回了空值包装（`preprocess`/`transform` 把空值转 `undefined`）→ 见第 6 节
+- **`trimmed` 不再产出 `undefined`**：trim 后为空就是空串，由字段自身约束判定。
+  历史写法「trim 后为空即视为未提供」已废弃，schema 层现在严格且与参数来源无关
+- **`ZodValidationPipe` 的宽容靠 `metadata.type === 'query'`**：直调 `pipe.transform(value)`
+  （不传 metadata）走**严格**分支，写单测时别忘了显式传 `{ type: 'query' }`
 - **日志不落盘先查 `LOG_FILE`**：`filePath` 为空时 `FileLogger` 根本不建文件通道，
   日志只走控制台（历史 bug 的根因就是 `.env` 里没配 `LOG_FILE`）
 - **`bufferLogs: true` 在本项目无效**：`NestApplication.init()` 末尾会先

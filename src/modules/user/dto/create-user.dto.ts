@@ -8,8 +8,12 @@ export const studentNoSchema = z.string().min(1).max(20);
 /**
  * 创建用户请求体。
  *
- * 字段统一经 `trimmedShape()` 规范化首尾空白（trim 后为空即视为"未提供"），
- * 例外字段就近用 `.meta({ keepWhitespace: true })` 标注。
+ * 字段统一经 `trimmedShape()` 去掉首尾空白，例外字段就近用
+ * `.meta({ keepWhitespace: true })` 标注。
+ *
+ * **请求体契约（AGENTS.md 第 6 节）：这里不做任何空值宽恕。**
+ * `''` / 纯空白由各字段的 `min(1)` 拒绝，`null` 报类型错误——"没提供"必须靠
+ * **省略 key** 表达，而不是传 `""` 或 `null`。可选字段若要"不参与"，同样直接省掉。
  */
 export const createUserSchema = z.object(
   trimmedShape({

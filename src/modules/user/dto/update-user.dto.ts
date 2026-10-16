@@ -7,8 +7,15 @@ import { trimmedShape } from '../../../common/validation/trimmed.js';
  *
  * 密码不在此接口修改——改密走 PATCH /users/:id/password。
  *
- * 字段均为可选且经首尾空白规范化：传空串 / 纯空白 / null 都等同"未提供该字段"，
- * 因此 `{"nickname": "   "}` 会被下面的 refine 判为"没有提供任何有效字段"而 400。
+ * 字段均为可选，语义是**严格的三态**（AGENTS.md 第 6 节）：
+ *
+ * - **省略 key** ⇒ 不改动该字段
+ * - **`""` / 纯空白** ⇒ 拒绝（`min(1)`）；要清空文本字段请用专门的接口，不要用空串
+ * - **`null`** ⇒ 拒绝（类型错误）。RFC 7396 里 `null` 是"删除该字段"的显式指令，
+ *   后端不做宽恕——否则"前端忘了传 null 字段"会被误判成"想清空"，静默改数据
+ *
+ * 因此 `{ "nickname": "" }`、`{ "role": "" }` 都报字段级 400，
+ * 而空对象 `{}` 落到下面的 refine，报「至少提供一个更新字段」。
  */
 export const updateUserSchema = z
   .object(

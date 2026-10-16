@@ -9,7 +9,11 @@ import { trimmedShape } from '../../../common/validation/trimmed.js';
  * 全部条件均为可选（`page`/`pageSize`/`sortBy`/`order` 带默认值）——
  * 不传任何条件时即查第一页、每页 10 条、**按修改时间倒序**（见 AGENTS.md 第 7 节
  * 「默认排序：修改时间降序」：最近改动过的记录排在最前，与创建时间无关）。
- * 传空串 / 纯空白同样视为"未提供"（走默认值或不参与筛选）。
+ *
+ * **query 是唯一的宽容通道**（AGENTS.md 第 6 节）：`''` 与纯空白由
+ * `ZodValidationPipe` 在校验前归零为「未提供」（`?keyword=` 是传输层假象），
+ * 走默认值或不参与筛选——**这份宽容由管道按参数来源提供，schema 自身保持严格**
+ * （直接 `queryUsersSchema.parse({ keyword: '   ' })` 会被 `min(1)` 拒绝）。
  *
  * - keyword：模糊匹配昵称 / 学号 / 邮箱
  * - role：按角色精确筛选

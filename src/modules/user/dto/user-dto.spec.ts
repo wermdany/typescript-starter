@@ -1,3 +1,4 @@
+import type { ArgumentMetadata } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
 
 import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe.js';
@@ -9,6 +10,14 @@ import {
   studentNoParamSchema,
 } from './reset-password.dto.js';
 import { updateUserSchema } from './update-user.dto.js';
+
+/**
+ * 来源元数据（等价于 @Query() / @Body() 的真实调用）。
+ *
+ * 请求体契约（AGENTS.md 第 6 节）：body 不做任何空值宽恕，schema 层同样严格；
+ * URL query 的宽容由管道按来源提供，因此"空白视为未提供"这类断言必须走 query 管道。
+ */
+const QUERY: ArgumentMetadata = { type: 'query' };
 
 /** 断言校验失败并返回 errors（不用 JSON 快照——会隐藏 undefined 键） */
 function expectFail(schema: { safeParse: (v: unknown) => unknown }, input: unknown) {
@@ -71,22 +80,40 @@ describe('createUserSchema：文本字段规范化 + password 例外', () => {
     expect(dto.password).toBe('        ');
   });
 
-  it('必填字段纯空白 → 视为未提供（received undefined）', () => {
+  it('必填字段纯空白 → trim 成空串后被 min(1) 拒绝（不再等同于"未提供"）', () => {
     const issues = expectFail(createUserSchema, {
       ...validCreate,
       nickname: '   ',
     });
     expect(issues[0]?.path).toBe('nickname');
-    expect(issues[0]?.message).toContain('received undefined');
+    expect(issues[0]?.message).toContain('>=1');
   });
 
-  it('role 带空白 → 规范化后走默认/取值', () => {
-    expect(createUserSchema.parse({ ...validCreate, role: '  ' }).role).toBe(
-      'student',
-    );
+  it('必填字段传空串同样被 min(1) 拒绝——前端必须省略 key 而不是传空值', () => {
+    const issues = expectFail(createUserSchema, { ...validCreate, studentNo: '' });
+    expect(issues[0]?.path).toBe('studentNo');
+    expect(issues[0]?.message).toContain('>=1');
+  });
+
+  it('role 带空白 → 规范化后取值', () => {
     expect(
       createUserSchema.parse({ ...validCreate, role: ' admin ' }).role,
     ).toBe('admin');
+  });
+
+  it('role 纯空白（或空串）→ 报非法枚举，不静默回落默认值', () => {
+    for (const input of ['  ', '']) {
+      expect(expectFail(createUserSchema, { ...validCreate, role: input })[0]?.path).toBe(
+        'role',
+      );
+    }
+    // 只有"不传"才走默认值
+    expect(createUserSchema.parse(validCreate).role).toBe('student');
+  });
+
+  it('null 报类型错误（RFC 7396 的 null 是显式语义，不能当成"没传"）', () => {
+    expect(expectFail(createUserSchema, { ...validCreate, nickname: null })[0]?.message)
+      .toContain('received null');
   });
 });
 
@@ -96,43 +123,53 @@ describe('resetPasswordSchema：同样排除 password', () => {
       '  pass1234  ',
     );
   });
+
+  it('空密码被 min(8) 拒绝（不被吞成"未提供"）', () => {
+    expect(expectFail(resetPasswordSchema, { password: '' })[0]?.path).toBe(
+      'password',
+    );
+  });
 });
 
-describe('updateUserSchema：空值等同未提供 + refine 正确判定', () => {
+describe('updateUserSchema：严格三态（省略 / 空值 / null）', () => {
   it('带空白的有效值被规范化', () => {
     expect(updateUserSchema.parse({ nickname: '  小明  ' })).toEqual({
       nickname: '小明',
     });
   });
 
-  it.each([
-    ['空对象', {}],
-    ['空串', { nickname: '' }],
-    ['纯空白', { nickname: '   ' }],
-    ['空枚举串', { role: '' }],
-  ])('%s → 拒绝为「至少提供一个更新字段」', (_label, input) => {
-    const issues = expectFail(updateUserSchema, input);
+  it('空对象 → 「至少提供一个更新字段」', () => {
+    const issues = expectFail(updateUserSchema, {});
     expect(issues.map((i) => i.message)).toContain('至少提供一个更新字段');
   });
 
-  it('显式 null 单独直调 schema 时报类型错误（null→未提供 由管道层负责）', () => {
+  it.each([
+    ['空串', { nickname: '' }],
+    ['纯空白', { nickname: '   ' }],
+    ['空枚举串', { role: '' }],
+  ])('%s → 字段级 400（不再被静默吞掉后落到 refine）', (_label, input) => {
+    const issues = expectFail(updateUserSchema, input);
+    expect(issues.map((i) => i.path)).toContain(
+      _label === '空枚举串' ? 'role' : 'nickname',
+    );
+    expect(issues.map((i) => i.message)).not.toContain('至少提供一个更新字段');
+  });
+
+  it('显式 null → 类型错误（PATCH 里 null ≠ "没有值"，后端不代为解释）', () => {
     const issues = expectFail(updateUserSchema, { nickname: null });
     expect(issues[0]?.message).toContain('received null');
   });
 
-  it('经管道后显式 null 等同未提供 → 拒绝为「至少提供一个更新字段」', () => {
+  it('经管道后显式 null 仍是类型错误（body 不做空值归一化）', () => {
     const pipe = new ZodValidationPipe(updateUserSchema);
     try {
-      pipe.transform({ nickname: null });
+      pipe.transform({ nickname: null }, { type: 'body' });
       throw new Error('应当抛出 BadRequestException');
     } catch (err) {
-      // 管道统一把细节放进 errors，message 固定为「参数校验失败」
       const response = (
         err as { getResponse(): { errors: { message: string }[] } }
       ).getResponse();
-      expect(response.errors.map((e) => e.message)).toContain(
-        '至少提供一个更新字段',
-      );
+      expect(response.errors[0]?.message).toContain('received null');
     }
   });
 
@@ -140,16 +177,19 @@ describe('updateUserSchema：空值等同未提供 + refine 正确判定', () =>
     expect(updateUserSchema.parse({ points: 0 })).toEqual({ points: 0 });
   });
 
-  it('混杂场景：一个有效 + 一个空白 → 只保留有效字段', () => {
-    expect(updateUserSchema.parse({ nickname: '   ', points: 5 })).toEqual({
+  it('混杂场景：有效字段与带空白的有效字段并存 → 都保留并规范化', () => {
+    expect(updateUserSchema.parse({ nickname: '  小明  ', points: 5 })).toEqual({
+      nickname: '小明',
       points: 5,
     });
   });
 });
 
-describe('queryUsersSchema：全部条件可选，空值走默认', () => {
+describe('queryUsersSchema：schema 自身严格，宽容由 query 管道提供', () => {
+  const queryPipe = new ZodValidationPipe(queryUsersSchema);
+
   it('空查询 → 第一页 / 10 条 / 修改时间倒序（AGENTS.md 第 7 节约定）', () => {
-    expect(queryUsersSchema.parse({})).toEqual({
+    expect(queryPipe.transform({}, QUERY)).toEqual({
       page: 1,
       pageSize: 10,
       sortBy: 'updatedAt',
@@ -166,9 +206,9 @@ describe('queryUsersSchema：全部条件可选，空值走默认', () => {
     );
   });
 
-  it('keyword 空白 → 视为未提供（不参与筛选）', () => {
-    const dto = queryUsersSchema.parse({ keyword: '   ' });
-    expect(dto.keyword).toBeUndefined();
+  it('keyword 空白 → 经 query 管道视为未提供（直接 parse schema 则被 min(1) 拒绝）', () => {
+    expect(queryPipe.transform({ keyword: '   ' }, QUERY).keyword).toBeUndefined();
+    expect(expectFail(queryUsersSchema, { keyword: '   ' })[0]?.path).toBe('keyword');
   });
 
   it('keyword 带空白 → 规范化', () => {
@@ -198,10 +238,8 @@ describe('studentNoParamSchema：路径参数校验', () => {
     expect(studentNoParamSchema.parse('  20250001  ')).toBe('20250001');
   });
 
-  it('纯空白 → 视为未提供', () => {
-    expect(expectFail(studentNoParamSchema, '   ')[0]?.message).toContain(
-      'received undefined',
-    );
+  it('纯空白 → trim 成空串后被 min(1) 拒绝', () => {
+    expect(expectFail(studentNoParamSchema, '   ')[0]?.message).toContain('>=1');
   });
 
   it('超长学号 → 长度错误（前置拦截 PG 22001 导致的 500）', () => {
@@ -218,13 +256,11 @@ describe('idParamSchema：:id 路径参数（纯数字字符串 → number）', 
     expect(typeof idParamSchema.parse('42')).toBe('number');
   });
 
-  it('空串 / 纯空白 → 未提供（而非被 Number("") === 0 误导成 too_small）', () => {
+  it('空串 / 纯空白 → trim 后由 /^\\d+$/ 拦下（而非被 Number("") === 0 误导成 too_small）', () => {
     for (const input of ['', '   ']) {
       const issues = expectFail(idParamSchema, input);
       expect(issues[0]?.path).toBe('');
-      expect(issues[0]?.message).toBe(
-        'Invalid input: expected string, received undefined',
-      );
+      expect(issues[0]?.message).toBe('ID 必须是正整数');
     }
   });
 
@@ -268,7 +304,7 @@ describe('idParamSchema：:id 路径参数（纯数字字符串 → number）', 
     }
   });
 
-  it('经管道后空白值同样落到「未提供」（管道层不处理顶层字符串）', () => {
+  it('经管道后空白值同样被拒绝（param 不在 query 宽容范围内）', () => {
     const pipe = new ZodValidationPipe(idParamSchema);
     try {
       pipe.transform('   ');
@@ -277,7 +313,7 @@ describe('idParamSchema：:id 路径参数（纯数字字符串 → number）', 
       const response = (
         err as { getResponse(): { errors: { message: string }[] } }
       ).getResponse();
-      expect(response.errors[0]?.message).toContain('received undefined');
+      expect(response.errors[0]?.message).toBe('ID 必须是正整数');
     }
   });
 });

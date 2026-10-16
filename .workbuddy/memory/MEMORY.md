@@ -13,13 +13,18 @@
 - 目录：业务模块放 `src/modules/<domain>/`（module/controller/service/mapper/dto），通用件放 `src/common/`
 - 响应契约：全局统一 `{ code, message, data }`——成功 `code:0`（`@ApiMessage` 可覆盖 message）；失败 `{ code: httpStatus, message: 简短原因, data: null }`，**参数校验失败额外带 `errors: [{path, message}]`**（zod issues 映射而非透传）；`@SkipTransform()` 可跳过包装；契约类型在 `src/common/response/api-response.ts`
 - 请求校验：zod v4 + `ZodValidationPipe` **按参数注册**（`@Body(new ZodValidationPipe(schema))`），不用 class-validator
-- 入参归一化（管道层统一）：query/body 中的 `''` 与显式 `null` **一律视为"未提供"**（→ undefined）；数组元素不动；递归只作用于普通对象。领域 schema 保持严格，不为单个 DTO 加空值包装
+- **入参归一化：只有 URL query 宽容（2026-10-16 重定契约）**——`ZodValidationPipe.transform(value, metadata)` 读 Nest 给的 `metadata.type`，**仅 `type === 'query'` 时**把 `''`/纯空白 → `undefined`（→ optional 通过、default 回落）；`@Body`/`@Param` **原样进 schema、不做任何空值宽恕**，注册处零改动。
+  - 用户要求：「清空现在空串/null 过滤，制定契约必须由前端处理；如果参数在 url query 则做处理」
+  - body 契约（AGENTS.md §6）：**"没提供" 只能靠省略 key 表达**；`""` 由字段自身 `min(1)` 拒（`Too small`），`null` 报 `received null`。依据 RFC 7396 / JSON Merge Patch：JSON 里 `null`=删除该字段、`""`=长度为 0 的真实值，**吃 null 会让 PATCH 无法表达"清空"**
+  - 只对 query 宽容的依据：URL 值是字符串装配产物（清空的输入框天生 `?keyword=`，`URLSearchParams` 无法表达"键不存在"），属**传输层假象**
+  - 仅递归普通对象、数组元素不动；直调 `pipe.transform(v)` 不传 metadata 走**严格**分支（写单测要显式传 `{ type: 'query' }`）
 - **首尾空白规范化（DTO schema 层，2026-10-15）**：`src/common/validation/trimmed.ts` 导出两个工具
-  - `trimmedShape({...})` 是**默认写法**：`z.object(trimmedShape({...}))` / `paginationSchema.extend(trimmedShape({...}))`，自动给每个顶层字段包 trim（非字符串字段透传无副作用），**trim 后为空即视为"未提供"**
+  - `trimmedShape({...})` 是**默认写法**：`z.object(trimmedShape({...}))` / `paginationSchema.extend(trimmedShape({...}))`，自动给每个顶层字段包 trim（非字符串字段透传无副作用）
+  - ⚠️ **`trimmed` 只 trim，不再产出 `undefined`**（2026-10-16 改）：trim 后为空就保持空串，交字段自身约束判定。旧语义「trim 后为空即视为未提供」已废弃——那让同一份 schema 无法区分"谁在宽容"，也把 body 空串一并吞掉了
   - 需要保留空白的字段（仅 `password`）在字段上写 `.meta({ keepWhitespace: true })` 就近声明例外
-  - `trimmed(schema)` 仅用于顶层非 shape 场景（如 `:studentNo` 路径参数——管道层只递归对象，path 参数需自行包）
-  - 只处理顶层字段，嵌套对象需在其定义处自行包一层；`.optional()/.default()` 写在内层
-- **数字路径参数（`:id`，2026-10-15 约定）**：`trimmed(z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().positive()))`，全部 `:id` 路由复用它。**不要用 `z.coerce.number()`**——`Number('') === 0` 会把空白值误报成 `Too small: expected number to be >0`（套 trimmed 后是「received undefined」= 未提供），且 `Number()` 会把 `'0x10'` 当 16、`'1e0'` 当 1。数字 ID 由 DB 生成、不接受客户端指定，故不额外约束业务范围（int4 上限不处理）
+  - `trimmed(schema)` 仅用于顶层非 shape 场景（如 `:studentNo` 路径参数——query 归一化与 shape 包装都覆盖不到 path 参数）
+  - 只处理顶层字段，嵌套对象需在其定义处自行包一层；`.optional()/.default()` 写在内层（现仅形式约定，两种写法语义已一致）
+- **数字路径参数（`:id`，2026-10-15 约定）**：`trimmed(z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().positive()))`，全部 `:id` 路由复用它。**不要用 `z.coerce.number()`**——`Number('') === 0` 会把空值误报成 `Too small`（看不出"没传"还是"传了 0"），且 `Number()` 会把 `'0x10'` 当 16、`'1e0'` 当 1。空白值现在落到 `/^\d+$/` 报「ID 必须是正整数」（不再是 `received undefined`）。数字 ID 由 DB 生成、不接受客户端指定，故不额外约束业务范围（int4 上限不处理）
 - 分页：列表 DTO 用 `paginationSchema.extend(...)`，查询走 `paginate()` 回调式助手，返回 `PageResponse<T>`
 - **列表默认排序一律 `updatedAt` 降序**（AGENTS.md 第 7 节，user 模块已对齐）：DTO `sortBy` 默认 `'updatedAt'` + 枚举含该项，Service `sortColumn` 映射表必须同步补项（漏项 TS 会报错，新增排序字段时靠它兜底）
 - 密码：用 Node 内置 `node:crypto` scrypt（用户明确拒绝 bcrypt），格式 `scrypt$N$r$p$saltHex$hashHex`；工具在 `src/common/crypto/password.scrypt.ts`

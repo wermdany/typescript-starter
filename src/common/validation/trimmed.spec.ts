@@ -26,14 +26,16 @@ describe('trimmed：首尾空白规范化', () => {
     expect(keyword.parse('\t小明\u3000')).toBe('小明');
   });
 
-  it('trim 后为空串 → 视为未提供（报 received undefined 而非长度错误）', () => {
+  it('trim 后为空串 → 保持空串，由内层约束拒绝（不再转成「未提供」）', () => {
     const issues = expectIssues(z.object({ keyword }), { keyword: '   ' });
-    expect(issues).toEqual([
-      {
-        path: 'keyword',
-        message: expect.stringContaining('received undefined'),
-      },
-    ]);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.path).toBe('keyword');
+    expect(issues[0]?.message).toContain('>=1');
+    expect(issues[0]?.message).not.toContain('undefined');
+  });
+
+  it('空串输入路径不变：只有 trim 被应用', () => {
+    expect(expectIssues(keyword, '')[0]?.message).toContain('>=1');
   });
 
   it('长度校验按 trim 后的值计算（带空白不会误伤 max 限制）', () => {
@@ -53,19 +55,29 @@ describe('trimmed：首尾空白规范化', () => {
     expect(numberish.parse(42)).toBe(42);
     expect(expectIssues(numberish, true)[0]?.path).toBe('');
   });
+
+  it('不产出 undefined：optional 字段拿到的是空串而非 undefined', () => {
+    const optional = trimmed(z.string().optional());
+    expect(optional.parse('')).toBe('');
+    expect(optional.parse('   ')).toBe(''); // 只 trim，不归零
+    expect(optional.parse(' x ')).toBe('x');
+    expect(optional.parse(undefined)).toBeUndefined();
+  });
 });
 
-describe('trimmed：与 .optional() / .default() 组合（修饰符必须在内层）', () => {
-  it('内层 .optional()：纯空白 → undefined 通过', () => {
-    const schema = trimmed(z.string().min(1).max(50).optional());
-    expect(schema.parse('   ')).toBeUndefined();
-    expect(schema.parse('  小明  ')).toBe('小明');
+describe('trimmed：修饰符位置（写法约定，不再承载语义）', () => {
+  it('内层 .default()：只有 undefined 才回落默认值，空串如实失败', () => {
+    const schema = trimmed(z.enum(['asc', 'desc']).default('desc'));
+    expect(schema.parse(undefined)).toBe('desc');
+    expect(schema.parse(' asc ')).toBe('asc');
+    expect(expectIssues(schema, '   ')[0]?.message).toContain('Invalid');
   });
 
-  it('内层 .default()：纯空白 → 走默认值', () => {
-    const schema = trimmed(z.enum(['asc', 'desc']).default('desc'));
-    expect(schema.parse('   ')).toBe('desc');
+  it('外层 .default()：语义与内层一致（两种写法现在等价）', () => {
+    const schema = trimmed(z.enum(['asc', 'desc'])).default('desc');
+    expect(schema.parse(undefined)).toBe('desc');
     expect(schema.parse(' asc ')).toBe('asc');
+    expect(expectIssues(schema, '   ')[0]?.message).toContain('Invalid');
   });
 
   it('对象内组合：错误 path 保持为字段名', () => {
@@ -99,7 +111,7 @@ describe('trimmedShape：shape 级自动包装', () => {
     expect(schema.parse({ ...valid, password: '  pass1234  ' }).password).toBe(
       '  pass1234  ',
     );
-    // 8 个空格通过 min(8)：证明该字段既没被 trim 也没被归零
+    // 8 个空格通过 min(8)：证明该字段没被 trim
     expect(schema.parse({ ...valid, password: '        ' }).password).toBe(
       '        ',
     );
@@ -114,14 +126,20 @@ describe('trimmedShape：shape 级自动包装', () => {
     expect(schema.parse({ ...valid, role: ' admin ' }).role).toBe('admin');
   });
 
-  it('纯空白必填字段 → 视为未提供（错误 path 仍为字段名）', () => {
+  it('纯空白必填字段 → trim 成空串后被 min(1) 拒绝（错误 path 仍为字段名）', () => {
     const issues = expectIssues(schema, { ...valid, nickname: '   ' });
     expect(issues[0]?.path).toBe('nickname');
-    expect(issues[0]?.message).toContain('received undefined');
+    expect(issues[0]?.message).toContain('>=1');
   });
 
-  it('可选字段纯空白 → 视为未提供（不参与筛选）', () => {
-    expect(schema.parse({ ...valid, keyword: '   ' }).keyword).toBeUndefined();
+  it('枚举字段纯空白 → 报非法枚举（不回落默认值）', () => {
+    expect(expectIssues(schema, { ...valid, role: '  ' })[0]?.path).toBe('role');
+  });
+
+  it('可选字段纯空白 → 同样被 min(1) 拒绝（query 侧的宽容由管道负责）', () => {
+    expect(expectIssues(schema, { ...valid, keyword: '   ' })[0]?.path).toBe(
+      'keyword',
+    );
     expect(schema.parse({ ...valid, keyword: '  小明  ' }).keyword).toBe('小明');
   });
 

@@ -20,14 +20,14 @@ export type ResetPasswordDto = z.infer<typeof resetPasswordSchema>;
 /**
  * `:id` 路径参数 schema（数字 ID，复用于全部 :id 路由）。
  *
- * 路径参数是顶层字符串，管道层的「空串 / null 归一化」（只递归普通对象）覆盖不到，
- * 因此与 `:studentNo` 一样显式套 {@link trimmed} 做首尾空白规范化。
+ * 路径参数是**顶层字符串**，不在管道层 `normalizeQueryValue` 的覆盖范围内
+ * （它只处理 query，且只递归普通对象），因此与 `:studentNo` 一样显式套
+ * {@link trimmed} 做首尾空白规范化；空白清掉后为空串，由下面的 `/^\d+$/` 拦下。
  *
  * 为什么不用 `z.coerce.number()`：
  *
  * 1. `Number('') === 0`，空串 / 纯空白会被误报成 `Too small: expected number to be >0`
- *    —— 看不出到底是"没传"还是"传了 0"。套 `trimmed` 后空白值等同「未提供」，
- *    报 `expected string, received undefined`，与其他参数（query / body）的缺失语义一致
+ *    —— 看不出到底是"没传"还是"传了 0"，语义含混
  * 2. `Number()` 解析过于宽松：`'0x10'` → 16、`'1e0'` → 1、`'+1'` / `'1.'` / `'2.0'` 照收。
  *    这里用 `/^\d+$/` 前置收紧，非纯数字统一报「ID 必须是正整数」
  *
@@ -47,8 +47,8 @@ export type IdParam = z.infer<typeof idParamSchema>;
 /**
  * `:studentNo` 路径参数 schema。
  *
- * 路径参数是顶层字符串，管道层的"空串/null 归一化"（只递归普通对象）与
- * shape 级包装都覆盖不到它，因此这里显式使用 `trimmed`。
+ * 路径参数是顶层字符串，管道层的 query 归一化与 shape 级包装都覆盖不到它，
+ * 因此这里显式使用 `trimmed`（只去首尾空白；清完为空则由 `min(1)` 拒绝）。
  * 同时补上长度约束：学号列为 varchar(20)，超出长度会触发 PG `22001`
  * 并冒泡为 500（`handlePgError` 只处理 23505），校验前置后变为 400。
  */
