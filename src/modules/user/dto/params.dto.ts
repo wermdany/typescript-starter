@@ -1,21 +1,7 @@
 import { z } from 'zod';
 
-import { trimmed, trimmedShape } from '../../../common/validation/trimmed.js';
+import { trimmed } from '../../../common/validation/trimmed.js';
 import { studentNoSchema } from './create-user.dto.js';
-
-/** 重置密码请求体 */
-export const resetPasswordSchema = z.object(
-  trimmedShape({
-    /**
-     * 新的明文密码（服务端 scrypt 哈希后存储）。
-     *
-     * `keepWhitespace`：与创建接口一致，空白可能是密码的熵，不规范化。
-     */
-    password: z.string().min(8).max(128).meta({ keepWhitespace: true }),
-  }),
-);
-
-export type ResetPasswordDto = z.infer<typeof resetPasswordSchema>;
 
 /**
  * `:id` 路径参数 schema（数字 ID，复用于全部 :id 路由）。

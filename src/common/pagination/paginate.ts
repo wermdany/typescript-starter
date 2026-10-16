@@ -22,7 +22,7 @@ export interface PageResponse<T> {
  * @example
  * const result = await paginate(
  *   (limit, offset) => ({
- *     rows: db.select().from(users).where(where).limit(limit).offset(offset),
+ *     rows: db.select(userPublicColumns).from(users).where(where).limit(limit).offset(offset),
  *     total: db
  *       .select({ value: count() })
  *       .from(users)
@@ -32,6 +32,10 @@ export interface PageResponse<T> {
  *   query.page,
  *   query.pageSize,
  * );
+ *
+ * @remarks
+ * `rows` 建议传 `<domain>.projection.ts` 的**列白名单**而不是 `.select()`：
+ * 白名单在 SQL 层就把敏感列挡掉，返回类型与响应契约类型天然同形（见 AGENTS.md 第 5 节）。
  */
 export async function paginate<T>(
   build: (limit: number, offset: number) => {

@@ -15,26 +15,19 @@ import { ApiMessage } from '../../common/decorators/api-message.decorator.js';
 import { type PageResponse } from '../../common/pagination/paginate.js';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe.js';
 import {
-  createUserSchema,
-  type CreateUserDto,
-} from './dto/create-user.dto.js';
-import {
-  queryUsersSchema,
-  type QueryUsersDto,
-} from './dto/query-users.dto.js';
+  changePasswordSchema,
+  type ChangePasswordDto,
+} from './dto/change-password.dto.js';
+import { createUserSchema, type CreateUserDto } from './dto/create-user.dto.js';
 import {
   idParamSchema,
-  resetPasswordSchema,
   studentNoParamSchema,
   type IdParam,
-  type ResetPasswordDto,
   type StudentNoParam,
-} from './dto/reset-password.dto.js';
-import {
-  updateUserSchema,
-  type UpdateUserDto,
-} from './dto/update-user.dto.js';
-import { type UserResponse } from './user.mapper.js';
+} from './dto/params.dto.js';
+import { queryUsersSchema, type QueryUsersDto } from './dto/query-users.dto.js';
+import { updateUserSchema, type UpdateUserDto } from './dto/update-user.dto.js';
+import { type UserResponse } from './user.projection.js';
 import { UserService } from './user.service.js';
 
 /**
@@ -83,20 +76,26 @@ export class UserController {
   /** 更新用户资料 */
   @Patch(':id')
   update(
-    @Param('id', new ZodValidationPipe(idParamSchema)) id: IdParam,
+    @Param('id', new ZodValidationPipe(idParamSchema))
+    id: IdParam,
     @Body(new ZodValidationPipe(updateUserSchema)) dto: UpdateUserDto,
   ): Promise<UserResponse> {
     return this.userService.update(id, dto);
   }
 
-  /** 重置密码 */
-  @ApiMessage('密码已重置')
+  /**
+   * 修改密码。
+   *
+   * 必须同时提交旧密码（`oldPassword`）——服务端比对存储的 scrypt 哈希，
+   * 不符返回 401（`success: false`，无 `errors`）。见 AGENTS.md 第 9 节。
+   */
+  @ApiMessage('密码已修改')
   @Patch(':id/password')
-  resetPassword(
+  changePassword(
     @Param('id', new ZodValidationPipe(idParamSchema)) id: IdParam,
-    @Body(new ZodValidationPipe(resetPasswordSchema)) dto: ResetPasswordDto,
+    @Body(new ZodValidationPipe(changePasswordSchema)) dto: ChangePasswordDto,
   ): Promise<void> {
-    return this.userService.resetPassword(id, dto);
+    return this.userService.changePassword(id, dto);
   }
 
   /** 恢复软删除用户 */

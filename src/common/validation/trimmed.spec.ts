@@ -95,7 +95,7 @@ describe('trimmedShape：shape 级自动包装', () => {
       nickname: z.string().min(1).max(50),
       points: z.number().int().nonnegative().default(0),
       keyword: z.string().min(1).max(20).optional(),
-      password: z.string().min(8).max(128).meta({ keepWhitespace: true }),
+      password: z.string().min(8).max(128),
       role: z.enum(['student', 'admin']).default('student'),
     }),
   );
@@ -107,13 +107,13 @@ describe('trimmedShape：shape 级自动包装', () => {
     expect(dto.nickname).toBe('小明');
   });
 
-  it('.meta({ keepWhitespace: true }) 标注的字段保留空白', () => {
+  it('password 与普通字段同样被 trim', () => {
     expect(schema.parse({ ...valid, password: '  pass1234  ' }).password).toBe(
-      '  pass1234  ',
+      'pass1234',
     );
-    // 8 个空格通过 min(8)：证明该字段没被 trim
-    expect(schema.parse({ ...valid, password: '        ' }).password).toBe(
-      '        ',
+    // 8 个空格 trim 成空串 → 被 min(8) 拒绝（不再靠长度蒙混过关）
+    expect(expectIssues(schema, { ...valid, password: '        ' })[0]?.path).toBe(
+      'password',
     );
   });
 

@@ -2,13 +2,10 @@ import type { ArgumentMetadata } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
 
 import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe.js';
+import { changePasswordSchema } from './change-password.dto.js';
 import { createUserSchema } from './create-user.dto.js';
+import { idParamSchema, studentNoParamSchema } from './params.dto.js';
 import { queryUsersSchema } from './query-users.dto.js';
-import {
-  idParamSchema,
-  resetPasswordSchema,
-  studentNoParamSchema,
-} from './reset-password.dto.js';
 import { updateUserSchema } from './update-user.dto.js';
 
 /**
@@ -20,10 +17,16 @@ import { updateUserSchema } from './update-user.dto.js';
 const QUERY: ArgumentMetadata = { type: 'query' };
 
 /** 断言校验失败并返回 errors（不用 JSON 快照——会隐藏 undefined 键） */
-function expectFail(schema: { safeParse: (v: unknown) => unknown }, input: unknown) {
+function expectFail(
+  schema: { safeParse: (v: unknown) => unknown },
+  input: unknown,
+) {
   const result = schema.safeParse(input) as
     | { success: true; data: unknown }
-    | { success: false; error: { issues: { path: PropertyKey[]; message: string }[] } };
+    | {
+        success: false;
+        error: { issues: { path: PropertyKey[]; message: string }[] };
+      };
   if (result.success) {
     throw new Error(`期望校验失败，实际通过：${JSON.stringify(result.data)}`);
   }
@@ -37,10 +40,11 @@ const validCreate = {
   studentNo: '20250001',
   email: 'ming@example.com',
   nickname: '小明',
-  password: '12345678',
+  // 满足 passwordSchema：长度 8、字符白名单、字母 + 数字两类
+  password: 'pass1234',
 };
 
-describe('createUserSchema：文本字段规范化 + password 例外', () => {
+describe('createUserSchema：文本字段规范化（无例外字段，password 同样处理）', () => {
   it('学号 / 邮箱 / 昵称的首尾空白被去掉', () => {
     const dto = createUserSchema.parse({
       ...validCreate,
@@ -53,31 +57,20 @@ describe('createUserSchema：文本字段规范化 + password 例外', () => {
     expect(dto.nickname).toBe('小明');
   });
 
-  it('password 不做 trim——首尾空白原样保留', () => {
+  it('password 同样被 trim——首尾空白不再保留', () => {
     const dto = createUserSchema.parse({
       ...validCreate,
       password: '  pass1234  ',
     });
-    expect(dto.password).toBe('  pass1234  ');
+    expect(dto.password).toBe('pass1234');
   });
 
-  it('password 字段以 .meta({ keepWhitespace: true }) 声明例外', () => {
-    expect(createUserSchema.shape.password.meta()).toMatchObject({
-      keepWhitespace: true,
-    });
-    expect(resetPasswordSchema.shape.password.meta()).toMatchObject({
-      keepWhitespace: true,
-    });
-    // 其他文本字段不应带该标记（由 trimmedShape 自动规范化）
-    expect(createUserSchema.shape.nickname.meta()?.keepWhitespace).toBeUndefined();
-  });
-
-  it('password 全为空白且长度达标 → 通过（未被归零），证明未 trim', () => {
-    const dto = createUserSchema.parse({
+  it('password 全为空白 → trim 成空串后被长度下限拒绝（曾被长度校验放过）', () => {
+    const issues = expectFail(createUserSchema, {
       ...validCreate,
       password: '        ',
     });
-    expect(dto.password).toBe('        ');
+    expect(issues[0]?.path).toBe('password');
   });
 
   it('必填字段纯空白 → trim 成空串后被 min(1) 拒绝（不再等同于"未提供"）', () => {
@@ -90,7 +83,10 @@ describe('createUserSchema：文本字段规范化 + password 例外', () => {
   });
 
   it('必填字段传空串同样被 min(1) 拒绝——前端必须省略 key 而不是传空值', () => {
-    const issues = expectFail(createUserSchema, { ...validCreate, studentNo: '' });
+    const issues = expectFail(createUserSchema, {
+      ...validCreate,
+      studentNo: '',
+    });
     expect(issues[0]?.path).toBe('studentNo');
     expect(issues[0]?.message).toContain('>=1');
   });
@@ -103,31 +99,103 @@ describe('createUserSchema：文本字段规范化 + password 例外', () => {
 
   it('role 纯空白（或空串）→ 报非法枚举，不静默回落默认值', () => {
     for (const input of ['  ', '']) {
-      expect(expectFail(createUserSchema, { ...validCreate, role: input })[0]?.path).toBe(
-        'role',
-      );
+      expect(
+        expectFail(createUserSchema, { ...validCreate, role: input })[0]?.path,
+      ).toBe('role');
     }
     // 只有"不传"才走默认值
     expect(createUserSchema.parse(validCreate).role).toBe('student');
   });
 
   it('null 报类型错误（RFC 7396 的 null 是显式语义，不能当成"没传"）', () => {
-    expect(expectFail(createUserSchema, { ...validCreate, nickname: null })[0]?.message)
-      .toContain('received null');
+    expect(
+      expectFail(createUserSchema, { ...validCreate, nickname: null })[0]
+        ?.message,
+    ).toContain('received null');
   });
 });
 
-describe('resetPasswordSchema：同样排除 password', () => {
-  it('首尾空白保留', () => {
-    expect(resetPasswordSchema.parse({ password: '  pass1234  ' }).password).toBe(
-      '  pass1234  ',
+describe('changePasswordSchema：旧密码必填 + 新密码走同一份规则', () => {
+  /** 旧密码故意用**历史字符集**（纯数字），模拟规则收窄之前设定的密码 */
+  const valid = { oldPassword: '12345678', password: 'pass_1234' };
+
+  it('两个字段的首尾空白都被去掉', () => {
+    expect(
+      changePasswordSchema.parse({
+        oldPassword: '  12345678  ',
+        password: '  pass_1234  ',
+      }),
+    ).toEqual({ oldPassword: '12345678', password: 'pass_1234' });
+  });
+
+  it('旧密码不受新字符规则约束：纯数字 12345678 照常通过（否则老用户被锁死）', () => {
+    expect(changePasswordSchema.parse(valid)).toEqual(valid);
+  });
+
+  it('省略旧密码 → 字段级 400 指向 oldPassword（不靠 message 分支）', () => {
+    const issues = expectFail(changePasswordSchema, { password: 'pass_1234' });
+    expect(issues.map((i) => i.path)).toContain('oldPassword');
+  });
+
+  it('旧密码为空串 / 纯空白 → 拒绝', () => {
+    for (const oldPassword of ['', '   ']) {
+      expect(
+        expectFail(changePasswordSchema, { ...valid, oldPassword }).map(
+          (i) => i.path,
+        ),
+      ).toContain('oldPassword');
+    }
+  });
+
+  it('旧密码长度上限沿用历史值 128：19 位以上的历史密码仍可提交（否则老用户被锁死）', () => {
+    const legacyOld = 'a'.repeat(24) + '1234'; // 28 位，新规则下是超长密码
+    expect(
+      changePasswordSchema.parse({ ...valid, oldPassword: legacyOld })
+        .oldPassword,
+    ).toBe(legacyOld);
+    // 同一串放进 password（=设置新密码）就被规则拦下
+    const issues = expectFail(changePasswordSchema, {
+      ...valid,
+      password: legacyOld,
+    });
+    expect(issues.map((i) => i.path)).toContain('password');
+  });
+
+  it('旧密码超过 128 位 → 拒绝，且不会送进 scrypt', () => {
+    expect(
+      expectFail(changePasswordSchema, {
+        ...valid,
+        oldPassword: 'a'.repeat(129),
+      })[0]?.path,
+    ).toBe('oldPassword');
+  });
+
+  it('新密码仍受规则约束：纯数字 → 400 且错误归属只在 password', () => {
+    const issues = expectFail(changePasswordSchema, {
+      ...valid,
+      password: '12345678',
+    });
+    expect(issues.map((i) => i.path)).toEqual(['password']);
+    expect(issues.map((i) => i.message)).toContain(
+      '密码需至少包含字母、数字、下划线中的两种',
     );
   });
 
-  it('空密码被 min(8) 拒绝（不被吞成"未提供"）', () => {
-    expect(expectFail(resetPasswordSchema, { password: '' })[0]?.path).toBe(
-      'password',
-    );
+  it('新密码含白名单外字符 → 400（空格 / 连字符 / 中文都不放行）', () => {
+    for (const password of ['pass 1234', 'pass-1234', '密码abcd1234']) {
+      expect(
+        expectFail(changePasswordSchema, { ...valid, password }).map(
+          (i) => i.path,
+        ),
+      ).toContain('password');
+    }
+  });
+
+  it('新密码全为空白 → trim 成空串后被长度下限拒绝', () => {
+    expect(
+      expectFail(changePasswordSchema, { ...valid, password: '        ' })[0]
+        ?.path,
+    ).toBe('password');
   });
 });
 
@@ -178,10 +246,12 @@ describe('updateUserSchema：严格三态（省略 / 空值 / null）', () => {
   });
 
   it('混杂场景：有效字段与带空白的有效字段并存 → 都保留并规范化', () => {
-    expect(updateUserSchema.parse({ nickname: '  小明  ', points: 5 })).toEqual({
-      nickname: '小明',
-      points: 5,
-    });
+    expect(updateUserSchema.parse({ nickname: '  小明  ', points: 5 })).toEqual(
+      {
+        nickname: '小明',
+        points: 5,
+      },
+    );
   });
 });
 
@@ -198,8 +268,12 @@ describe('queryUsersSchema：schema 自身严格，宽容由 query 管道提供'
   });
 
   it('sortBy 白名单包含 updatedAt 与 createdAt（后者仍可按需显式指定）', () => {
-    expect(queryUsersSchema.parse({ sortBy: 'updatedAt' }).sortBy).toBe('updatedAt');
-    expect(queryUsersSchema.parse({ sortBy: 'createdAt' }).sortBy).toBe('createdAt');
+    expect(queryUsersSchema.parse({ sortBy: 'updatedAt' }).sortBy).toBe(
+      'updatedAt',
+    );
+    expect(queryUsersSchema.parse({ sortBy: 'createdAt' }).sortBy).toBe(
+      'createdAt',
+    );
     // 未列入白名单的列（如 deletedAt）仍拒绝
     expect(expectFail(queryUsersSchema, { sortBy: 'deletedAt' })[0]?.path).toBe(
       'sortBy',
@@ -207,12 +281,18 @@ describe('queryUsersSchema：schema 自身严格，宽容由 query 管道提供'
   });
 
   it('keyword 空白 → 经 query 管道视为未提供（直接 parse schema 则被 min(1) 拒绝）', () => {
-    expect(queryPipe.transform({ keyword: '   ' }, QUERY).keyword).toBeUndefined();
-    expect(expectFail(queryUsersSchema, { keyword: '   ' })[0]?.path).toBe('keyword');
+    expect(
+      queryPipe.transform({ keyword: '   ' }, QUERY).keyword,
+    ).toBeUndefined();
+    expect(expectFail(queryUsersSchema, { keyword: '   ' })[0]?.path).toBe(
+      'keyword',
+    );
   });
 
   it('keyword 带空白 → 规范化', () => {
-    expect(queryUsersSchema.parse({ keyword: '  小明  ' }).keyword).toBe('小明');
+    expect(queryUsersSchema.parse({ keyword: '  小明  ' }).keyword).toBe(
+      '小明',
+    );
   });
 
   it('枚举字段带空白 → 规范化后正常解析', () => {
@@ -221,15 +301,23 @@ describe('queryUsersSchema：schema 自身严格，宽容由 query 管道提供'
       sortBy: ' points ',
       order: ' asc ',
     });
-    expect(dto).toMatchObject({ role: 'student', sortBy: 'points', order: 'asc' });
+    expect(dto).toMatchObject({
+      role: 'student',
+      sortBy: 'points',
+      order: 'asc',
+    });
   });
 
   it('枚举值大小写敏感（trim 不做大小写折叠）', () => {
-    expect(expectFail(queryUsersSchema, { order: ' ASC ' })[0]?.path).toBe('order');
+    expect(expectFail(queryUsersSchema, { order: ' ASC ' })[0]?.path).toBe(
+      'order',
+    );
   });
 
   it('枚举值非法仍拒绝', () => {
-    expect(expectFail(queryUsersSchema, { role: 'teacher' })[0]?.path).toBe('role');
+    expect(expectFail(queryUsersSchema, { role: 'teacher' })[0]?.path).toBe(
+      'role',
+    );
   });
 });
 
@@ -239,7 +327,9 @@ describe('studentNoParamSchema：路径参数校验', () => {
   });
 
   it('纯空白 → trim 成空串后被 min(1) 拒绝', () => {
-    expect(expectFail(studentNoParamSchema, '   ')[0]?.message).toContain('>=1');
+    expect(expectFail(studentNoParamSchema, '   ')[0]?.message).toContain(
+      '>=1',
+    );
   });
 
   it('超长学号 → 长度错误（前置拦截 PG 22001 导致的 500）', () => {
@@ -274,7 +364,9 @@ describe('idParamSchema：:id 路径参数（纯数字字符串 → number）', 
     ['数字分隔符', '1_000'],
     ['数字后跟字母', '12abc'],
   ])('%s → 拒绝（不受 Number() 宽松解析影响）', (_label, input) => {
-    expect(expectFail(idParamSchema, input)[0]?.message).toBe('ID 必须是正整数');
+    expect(expectFail(idParamSchema, input)[0]?.message).toBe(
+      'ID 必须是正整数',
+    );
   });
 
   it('0 / 000 → 非正整数', () => {
@@ -283,9 +375,9 @@ describe('idParamSchema：:id 路径参数（纯数字字符串 → number）', 
   });
 
   it('超出安全整数 → Too big（不把失真浮点数带进 DB）', () => {
-    expect(expectFail(idParamSchema, '99999999999999999999')[0]?.message).toMatch(
-      /Too big/i,
-    );
+    expect(
+      expectFail(idParamSchema, '99999999999999999999')[0]?.message,
+    ).toMatch(/Too big/i);
   });
 
   it('经管道后失败形态符合契约：message 固定 + errors 数组', () => {
@@ -300,7 +392,9 @@ describe('idParamSchema：:id 路径参数（纯数字字符串 → number）', 
         }
       ).getResponse();
       expect(response.message).toBe('参数校验失败');
-      expect(response.errors).toEqual([{ path: '', message: 'ID 必须是正整数' }]);
+      expect(response.errors).toEqual([
+        { path: '', message: 'ID 必须是正整数' },
+      ]);
     }
   });
 

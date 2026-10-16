@@ -1,4 +1,8 @@
-import { randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
+import {
+  randomBytes,
+  scrypt as scryptCallback,
+  timingSafeEqual,
+} from 'node:crypto';
 
 /** promisify(scrypt) 会丢失带 options 的重载签名，手写 Promise 包装保留完整参数 */
 function scrypt(
@@ -70,5 +74,7 @@ export async function verifyPassword(
     r: Number(r),
     p: Number(p),
   });
-  return derived.length === expected.length && timingSafeEqual(derived, expected);
+  return (
+    derived.length === expected.length && timingSafeEqual(derived, expected)
+  );
 }

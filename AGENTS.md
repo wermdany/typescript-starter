@@ -68,6 +68,8 @@ src/
 │   ├── pagination/               #   paginationSchema + paginate() + PageResponse
 │   ├── pipes/zod-validation.pipe.ts       # 按参数注册的 zod 校验管道（query 空值宽容 / body 严格）
 │   ├── response/api-response.ts  #   ★ 响应契约类型（ApiSuccess/ApiFailure/FieldError + 默认文案常量）
+│   ├── validation/trimmed.ts     #   首尾空白规范化（trimmed / trimmedShape）
+│   ├── validation/password.ts    #   ★ 密码规则（长度/字符白名单/字符类别，创建与改密共用）
 │   └── startup/local-addresses.ts #   启动时枚举可访问地址（回环 + 局域网 IPv4）
 ├── db/
 │   ├── drizzle/                  #   DrizzleModule(@Global) + DrizzleService
@@ -77,12 +79,13 @@ src/
     ├── <domain>.module.ts
     ├── <domain>.controller.ts
     ├── <domain>.service.ts
-    ├── <domain>.mapper.ts        #   实体 → 对外响应（剔除敏感字段）
+    ├── <domain>.projection.ts    #   ★ 对外字段白名单（列投影）+ `XxxResponse` 类型
     └── dto/                      #   zod schema + z.infer 类型
 ```
 
 **分层铁律**：Controller 只做路由与参数校验；Service 承载全部业务逻辑（SQL、哈希、异常转换）；
-Mapper 负责实体到响应的显式转换；DTO 用 zod schema 定义并导出 `z.infer` 类型。
+`<domain>.projection.ts` 以**列白名单**界定哪些字段可以对外（不写映射函数，见第 5 节）；
+DTO 用 zod schema 定义并导出 `z.infer` 类型。
 
 ---
 
@@ -150,7 +153,7 @@ pnpm db:studio        # 可视化查看数据
 ```
 
 - `message` **恒有值**：默认 `DEFAULT_SUCCESS_MESSAGE`（`'ok'`），`@ApiMessage('创建成功')` 覆盖
-- 无返回值的操作（如重置密码）`data` 为 `null` —— **不要改成 204**，判别字段在 body 里
+- 无返回值的操作（如修改密码）`data` 为 `null` —— **不要改成 204**，判别字段在 body 里
 - 健康检查、文件下载等特殊端点用 `@SkipTransform()` 跳过包装。这是**明确的例外**：
   这些响应体不是契约 JSON，前端也不能按 `success` 判别
 
@@ -180,6 +183,47 @@ pnpm db:studio        # 可视化查看数据
      分支只能靠 `success` / HTTP 状态码 / `errors[].path`
    - 服务端只有中文、不做 i18n（多语言由前端自行映射）
    - 由此**改文案不算契约变更**，但改 `success` 语义/字段名是破坏性变更
+
+### `data` 里的字段：列级**白名单**（不要用 `Omit`）
+
+信封之外，`data` 里的字段由 `<domain>.projection.ts` 的**列白名单**决定 ——
+它同时是 SQL 投影和响应类型，把"哪些列可以对外"收敛成**唯一出处**：
+
+```ts
+export const userPublicColumns = {
+  id: users.id,
+  studentNo: users.studentNo,
+  // …
+} as const;
+
+export type UserResponse = Pick<Users, keyof typeof userPublicColumns>;
+```
+
+```ts
+this.db.select(userPublicColumns).from(users).where(...)          // → UserResponse[]
+this.db.insert(users).values(...).returning(userPublicColumns)    // → UserResponse[]
+this.db.update(users).set(...).returning(userPublicColumns)       // → UserResponse[]
+```
+
+**为什么不是 `Omit<Users, 'passwordHash'>`（黑名单）**：黑名单默认**公开**、只挡住记得住的列，
+于是有三个失败模式 —— ① 每处查询都要记得调 `toUserResponse()`，漏一处就裸奔；
+② 不像密码那样"显然敏感"的列（`deletedAt`）会静默溜出响应；
+③ 以后加 `idCardNo` / `phone`，**不改代码就默认泄露，且编译期不报错**。
+白名单把默认值翻到安全一侧：列的增删改都会在投影处编译期暴露（`users.xxx` 不存在即报错）。
+
+连带的三条规则：
+
+- **不需要 `toXxxResponse()` 映射函数**：白名单在 SQL 层生效，TS 从列对象直接推导响应类型，
+  "忘了映射"这个失败模式根本不存在（这也是 `mapper.ts` 更名 `projection.ts` 的原因）
+- **需要敏感列时另行显式 select**（如登录校验取 `passwordHash`），**不要**把它加进公共白名单；
+  某接口要额外字段就另建投影（`{ ...userPublicColumns, deletedAt: users.deletedAt }`）——
+  公共白名单一旦被单个接口撑大，就退化成黑名单了
+- **`deletedAt` 刻意不对外**：它是软删除的持久化标记，而所有读路径都带 `isNull(deletedAt)`，
+  未删用户返回的它**恒为 `null`**，对客户端是纯噪音，还会误导客户端拿它判断软删除状态
+  （"删成功了"由 HTTP 状态 + `success` 表达）。管理端真要查已删列表请单开资源语义
+  （如 `GET /users/deleted`）并自建投影
+- 白名单的键集合由 `<domain>.projection.spec.ts` 冻结成断言 —— 加列会让测试失败，
+  逼改动者显式确认"客户端真的需要吗"
 
 ### 为什么没有 `code`（历史决策，不要加回来）
 
@@ -234,20 +278,29 @@ findOne(@Param('id', new ZodValidationPipe(idParamSchema)) id: IdParam) {}
 ### 首尾空白与路径参数
 
 - `trimmedShape({...})` 仍是 DTO 的**默认写法**：自动给每个顶层字段去掉首尾空白
-  （非字符串字段透传、无副作用）；例外字段就近写 `.meta({ keepWhitespace: true })`（目前只有 `password`）
+  （非字符串字段透传、无副作用）；**无例外字段** —— `password` 同样规范化
+- **单字段理论上可直接用 zod 原生 `.trim()`**（现在代码里没有这种写法，一律走 `trimmed()` /
+  `trimmedShape()`；仅 `trimmed.spec.ts` 里为验证顺序陷阱保留了一个用例），若要用，
+  ⚠️ **`.trim()` 必须紧跟 `z.string()`、排在长度/格式校验之前**：zod 的 check 按**链式顺序**
+  求值，写成 `z.string().min(8).max(128).trim()` 会让 `'        '`（8 空格）先通过 `min(8)`、
+  再被 trim 成空串落库 —— 等于允许把密码设成 `''`（zod 4.6.7 实测，且服务端回归验证过）。
+  `trimmed()` / `trimmedShape()` 在构造上不存在这个顺序问题（`preprocess` 恒在内层校验之前），
+  这正是它们仍是**多字段 DTO 默认写法**的原因
 - **`trimmed` 只 trim，不产出 `undefined`** —— trim 后为空就保持空串，交给字段自身的 `min(1)` 判定。
   历史版本曾在 schema 层做"trim 后为空 → 未提供"，已废弃：那让同一份 schema 无法区分"谁在宽容"，
   也把 body 的空串一并吞掉了
 - 只处理**顶层字段**；嵌套对象（如 `address`）在其定义处自行包一层 `z.object(trimmedShape({...}))`；
   数组元素不处理
-- `trimmed(schema)` 用于**顶层非 shape** 场景（`:id` / `:studentNo` 路径参数）——路径参数是顶层字符串，
-  query 归一化与 shape 包装都覆盖不到它，两个方向都要显式处理（都在 `reset-password.dto.ts`）：
+- `trimmed(schema)` 用于**顶层非 shape** 场景（`:id` / `:studentNo` 路径参数）——
+  路径参数是顶层字符串，query 归一化与 shape 包装都覆盖不到它，两个方向都要显式处理
+  （都在 `dto/params.dto.ts`）：
   - 文本类 `:studentNo` → `trimmed(studentNoSchema)`
   - 数字类 `:id` → `trimmed(z.string().regex(/^\d+$/).transform(Number).pipe(z.number().int().positive()))`：
     **不能**只用 `z.coerce.number()`——`Number('') === 0` 会把空值误报成
     `Too small: expected number to be >0`（看不出"没传"还是"传了 0"），且 `Number()` 会把 `'0x10'`
     解析成 16、`'1e0'` 解析成 1；`/^\d+$/` 前置收紧后再 `.pipe()` 保留数字域校验
-    （`'0'` → `>0`，超安全整数 → `Too big`）
+    （`'0'` → `>0`，超安全整数 → `Too big`）。同样，trim 必须排在 `.regex()` **之前**
+    （外层 `trimmed()` 的 `preprocess` 保证）
 
 其他规则：
 
@@ -268,7 +321,7 @@ findOne(@Param('id', new ZodValidationPipe(idParamSchema)) id: IdParam) {}
 ```ts
 const result = await paginate(
   (limit, offset) => ({
-    rows: this.db.select().from(users).where(where).orderBy(orderBy).limit(limit).offset(offset),
+    rows: this.db.select(userPublicColumns).from(users).where(where).orderBy(orderBy).limit(limit).offset(offset),
     total: this.db.select({ value: count() }).from(users).where(where).then((r) => r[0]?.value ?? 0),
   }),
   query.page,
@@ -321,7 +374,38 @@ const result = await paginate(
 - 存储格式自描述：`scrypt$N$r$p$saltHex$hashHex`；`verifyPassword` 从存储串解析参数（参数升级后旧哈希仍可用），
   用 `timingSafeEqual` 恒定时间比对
 - 密码哈希在 DB 操作**之前**计算，避免占用数据库连接
-- 哈希永不外泄：Mapper 用 `Omit<Users, 'passwordHash'>` 在编译期保证（不依赖全局拦截器魔法）
+- 哈希永不外泄：靠 `<domain>.projection.ts` 的**列白名单**（第 5 节）—— `passwordHash`
+  压根不在投影里，**数据库层就不返回它**（不是"查出来再删"，也**不依赖**全局拦截器魔法）。
+  需要哈希的场景（登录校验）必须另行显式 select 该列
+
+### 密码规则（`src/common/validation/password.ts`，**纯校验，不涉及 DB 结构**）
+
+`passwordSchema` 是**创建用户与修改密码共用的唯一出处**（三处都要改就别叫"唯一"了）：
+
+| 约束 | 值 | 说明 |
+| --- | --- | --- |
+| 长度 | 8~18（`PASSWORD_MIN_LENGTH` / `PASSWORD_MAX_LENGTH`） | 上限按字符计，不是字节 |
+| 字符白名单 | `^[A-Za-z0-9_]+$`（`PASSWORD_ALLOWED_CHARS`） | 仅字母/数字/下划线；空格、连字符、中文、emoji、零宽空格全拒 |
+| 字符类别 | 三类（字母/数字/下划线）**至少占两类** | 纯数字 `12345678`、纯字母、纯下划线都不合格 |
+
+- **白名单而非黑名单**：黑名单只挡得住"想得到的"字符，挡不住 emoji、Unicode 空白（`\u200b`）与同形字符
+- 规则收在 schema 里，**数据库结构不变**（明文密码从不入库，只存哈希），因此不需要迁移；
+  已存在的历史密码照旧可用（校验只比对哈希，与规则无关）
+- ⚠️ **`oldPassword` 不要套 `passwordSchema`**：那是"设密码"的规则，不是"验密码"的规则。
+  库里存在规则收窄前设定的密码（种子演示账号 `12345678`、以及 8~128 位的历史密码），
+  用新规则卡旧密码 = 把老用户永久锁在门外。旧密码只要求非空 + `LEGACY_PASSWORD_MAX_LENGTH`（128，
+  = 收窄前的上限，仅为 scrypt 输入规模兜底）
+
+### 修改密码：`PATCH /users/:id/password`（**必须提交旧密码**）
+
+- 请求体 `{ oldPassword, password }`，两个字段都经 `trimmedShape()` 规范化
+- 服务端流程（`UserService.changePassword()`）：显式 `select({ passwordHash })` → 不存在 404
+  → `verifyPassword(oldPassword, hash)` 不符 **401**「旧密码不正确」→ 通过后才 `hashPassword(password)` 写库
+- **为什么是 401 而不是 400**：请求参数完全合法，失败点在"凭据"。客户端要能区分
+  400（格式/规则，带 `errors[]`）/ 401（旧密码错）/ 404（用户不存在）—— 不要按 `message` 分支（第 5 节）
+- 旧密码比对是 scrypt（慢），**先判存在再比对**，不要用不存在的 id 白跑一次派生
+- 该接口现为**自助改密**语义（谁都能凭旧密码改）。项目目前没有登录/鉴权模块，
+  将来接入鉴权后应改为从会话取当前用户，**不要**再信任路径上的 `:id`
 
 ---
 
@@ -504,11 +588,18 @@ const result = await paginate(
    - 入站透传：`curl -H 'x-trace-id: abc-123' ...`，日志与响应头都应出现 `abc-123`
    - **入参宽容边界（第 6 节契约）**：query 侧宽容 —— `curl '.../users?page=&pageSize=&keyword='`
      应正常返回列表（空值视为未提供）；body 侧严格 ——
-     `curl -X POST .../users -d '{"studentNo":"20250001","email":"a@b.com","nickname":"","password":"12345678"}'`
+     `curl -X POST .../users -d '{"studentNo":"20250001","email":"a@b.com","nickname":"","password":"pass1234"}'`
      应 400 且 `errors[].path` 指向 `nickname`（**不是**被吞成"未提供"）
+   - **改密接口（第 9 节）**：`curl -X PATCH .../users/1/password -d '{"oldPassword":"...","password":"pass1234"}'`
+     —— 旧密码错误必须 **401**（不是 400）、省略 `oldPassword` 必须 400 且 `errors[].path=oldPassword`、
+     新密码违规必须 400 且 `errors[].path=password`（两类错误的归属不要串到一起）
    - **响应契约（第 5 节）**：成功体必须是 `success:true` 且 HTTP 为 2xx；
      失败体必须 `success:false` + `data:null`；两者都**不应出现** `code` 字段；
      400 带 `errors[]`、404/409 不带
+   - **响应字段白名单（第 5 节）**：每个读/写接口的响应体都**不应出现** `passwordHash` /
+     `deletedAt`（`curl ... | grep -c 'passwordHash\|deletedAt'` 应为 0），
+     也不应出现任何未列在白名单里的列；改过投影要跑 `pnpm test`
+     （`*.projection.spec.ts` 会把字段集合的变化测出来）
    - **失败行数要对**：4xx 命中路由应**只有 1 行**（access `warn`，**不应**再有 `HttpExceptionFilter`
      的 4xx 行）；5xx 应**恰好 2 行**（过滤器堆栈行在前 → access `error` 行在后，两者 traceId 相同）；
      404 未命中路由、malformed JSON 的 400 也应有 access 行且**带耗时**
@@ -569,7 +660,7 @@ const result = await paginate(
   新增响应路径（自定义 filter、直接操作 `res`、第三方中间件短路）时务必不要产出
   `200 + success:false` —— 那会废掉重试/网关/监控三件事
 - **无返回值接口不要改成 204**：判别字段 `success` 在 body 里，204 无 body 会让前端
-  失去唯一判据。保持 `200 + { success: true, message: '密码已重置', data: null }`
+  失去唯一判据。保持 `200 + { success: true, message: '密码已修改', data: null }`
 - **`message` 不是机器判据**：它是给用户看的 toast 文案，客户端不得字符串匹配、
   服务端不保证稳定；分支一律靠 `success` / HTTP 状态码 / `errors[].path`
 - **契约里已经没有 `code` 字段**：见到 `code` 说明是遗留代码或新写的旧风格（第 5 节）
@@ -586,7 +677,7 @@ const result = await paginate(
 
 1. `db/schema/<domain>.schema.ts` —— 建表（`...timestamps()`）+ 索引；在 `db/schema/index.ts` 导出
 2. `dto/*.ts` —— zod schema（`create` / `update` / `query` 列表用 `paginationSchema.extend`，**默认排序 `updatedAt` 降序**，见第 7 节）+ 导出 `z.infer` 类型
-3. `<domain>.mapper.ts` —— 定义 `XxxResponse` 并实现 `toXxxResponse()`（剔除敏感字段）
+3. `<domain>.projection.ts` —— 定义**对外字段白名单** `xxxPublicColumns`（`as const`）+ `type XxxResponse = Pick<Xxx, keyof typeof xxxPublicColumns>`；Service 的 `select` / `returning` 一律传它（**不要** `Omit`、不要写映射函数）
 4. `<domain>.service.ts` —— 业务逻辑；查询带 `isNull(deletedAt)`；唯一冲突转 409（记得解包 `cause`）
 5. `<domain>.controller.ts` —— REST 路由 + `ZodValidationPipe` 按参数注册 + `@ApiMessage`；静态段路由排在 `:id` 前
 6. `<domain>.module.ts` —— 声明 controller/service（`DrizzleModule` 是 `@Global`，无需 import）

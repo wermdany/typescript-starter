@@ -1,8 +1,5 @@
 import { z } from 'zod';
 
-/** 字段级例外标记：在字段上写 `.meta({ keepWhitespace: true })` 即可跳过首尾空白规范化 */
-const KEEP_WHITESPACE = 'keepWhitespace';
-
 /**
  * 文本字段首尾空白规范化（单个 schema 用；批量场景优先 {@link trimmedShape}）。
  *
@@ -27,8 +24,8 @@ const KEEP_WHITESPACE = 'keepWhitespace';
  * 1. **`.optional()` / `.default()` 写在内层**（`trimmed(z.string().optional())`）——
  *    `trimmedShape` 天然满足。两层写法如今语义一致（本函数不再产出 `undefined`），
  *    保留这条只为写法统一，避免日后有人按位置差异推断出并不存在的语义
- * 2. **不要用于 `password`**——空白可能是密码的熵，社区一致的字段级策略；
- *    在 DTO 里请改用 `.meta({ keepWhitespace: true })` 标注（见 {@link trimmedShape}）
+ * 2. **无例外字段**：所有文本字段一律规范化，`password` 也不例外 —— 长度校验因此
+ *    作用于 trim 后的值（`'        '` 会被 `min(8)` 拒绝，而非靠长度蒙混过关）
  * 3. **长度校验按 trim 后的值计算**（zod 按顺序执行 check），因此 `max(20)` 不会误伤
  *    `' 20250001 '` 这类"内容合法但带空格"的输入
  *
@@ -56,8 +53,7 @@ export function trimmed<T extends z.ZodType>(schema: T) {
 }
 
 /**
- * 把 shape 中每个字段自动包一层 {@link trimmed}，除非该字段标注了
- * `.meta({ keepWhitespace: true })`。
+ * 把 shape 中每个字段自动包一层 {@link trimmed}（**无例外**）。
  *
  * 这是 DTO 的**默认写法**——避免逐字段手写包装时"新增字段漏包"，
  * 那会制造「有些接口 trim、有些不 trim」的不一致（唯一性 / 搜索层面的静默 bug）。
@@ -65,14 +61,16 @@ export function trimmed<T extends z.ZodType>(schema: T) {
  * ```ts
  * export const createUserSchema = z.object(
  *   trimmedShape({
- *     nickname: z.string().min(1).max(50),                               // 自动 trim
- *     password: z.string().min(8).max(128).meta({ keepWhitespace: true }) // 就近声明例外
+ *     nickname: z.string().min(1).max(50),
+ *     password: z.string().min(8).max(128), // 同样被 trim
  *   }),
  * );
  * ```
  *
  * 设计要点：
  *
+ * - **无条件规范化**：每个顶层字段都包一层 `trimmed`，不存在例外字段 ——
+ *   因此不可能出现"注册 trim、登录不 trim"这类两侧不一致
  * - **只重建 shape，不重建对象**：返回值是普通 shape，由调用方照常交给
  *   `z.object(...)` / `paginationSchema.extend(...)`，因此 `.strict()` / `.catchall()`
  *   等对象级配置、以及链在其后的 `.refine()` 都不会丢失
@@ -85,9 +83,9 @@ export function trimmed<T extends z.ZodType>(schema: T) {
  * - **不做空值宽恕**：见 {@link trimmed} 的说明，空值宽容只发生在 query 的管道层
  */
 export function trimmedShape<T extends Record<string, z.ZodType>>(shape: T): T {
-  const wrapped = Object.entries(shape).map(([key, field]) => {
-    const meta = field.meta() as Record<string, unknown> | undefined;
-    return [key, meta?.[KEEP_WHITESPACE] === true ? field : trimmed(field)];
-  });
+  const wrapped = Object.entries(shape).map(([key, field]) => [
+    key,
+    trimmed(field),
+  ]);
   return Object.fromEntries(wrapped) as T;
 }
