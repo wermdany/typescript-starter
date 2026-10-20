@@ -67,3 +67,51 @@ describe('envSchema / LOG_FILE', () => {
     if (result.success) expect(result.data.LOG_FILE).toBe('');
   });
 });
+
+describe('envSchema / 连接池与认证变量', () => {
+  it('DB_POOL_MAX 在 schema 里，默认 10，非法值 fail-fast', () => {
+    const result = parse();
+
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.DB_POOL_MAX).toBe(10);
+    expect(parse({ DB_POOL_MAX: '0' }).success).toBe(false);
+    expect(parse({ DB_POOL_MAX: '1.5' }).success).toBe(false);
+  });
+
+  it('认证变量未设置时给出可用默认值（access 2h / refresh 7d / 滑动续期）', () => {
+    const result = parse();
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toMatchObject({
+        AUTH_ACCESS_TTL_MINUTES: 120,
+        AUTH_REFRESH_TTL_DAYS: 7,
+        AUTH_REFRESH_SLIDING: true,
+        AUTH_REFRESH_WINDOW_MINUTES: 5,
+        AUTH_MAX_SESSIONS_PER_USER: 20,
+        AUTH_LOGIN_MAX_ATTEMPTS: 10,
+        AUTH_LOGIN_WINDOW_MINUTES: 15,
+        AUTH_TRUST_PROXY: false,
+      });
+    }
+  });
+
+  it('有效期必须为正整数', () => {
+    expect(parse({ AUTH_ACCESS_TTL_MINUTES: '0' }).success).toBe(false);
+    expect(parse({ AUTH_REFRESH_TTL_DAYS: '-7' }).success).toBe(false);
+  });
+
+  it('认证布尔变量同样走布尔词表（不接受随意字符串）', () => {
+    const result = parse({
+      AUTH_REFRESH_SLIDING: 'off',
+      AUTH_TRUST_PROXY: 'on',
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.AUTH_REFRESH_SLIDING).toBe(false);
+      expect(result.data.AUTH_TRUST_PROXY).toBe(true);
+    }
+    expect(parse({ AUTH_TRUST_PROXY: 'maybe' }).success).toBe(false);
+  });
+});

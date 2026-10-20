@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { Pool } from 'pg';
 import { drizzle, NodePgDatabase } from 'drizzle-orm/node-postgres';
 
+import type { Env } from '@/config/env.js';
 import { formatError } from '@/logger/error-format.js';
 import * as schema from '@/database/schema/index.js';
 
@@ -19,10 +20,10 @@ export class DatabaseService implements OnModuleInit, OnApplicationShutdown {
   private readonly pool: Pool;
   readonly db: Db;
 
-  constructor(config: ConfigService) {
+  constructor(config: ConfigService<Env, true>) {
     this.pool = new Pool({
-      connectionString: config.getOrThrow<string>('DATABASE_URL'),
-      max: config.get<number>('DB_POOL_MAX', 10),
+      connectionString: config.getOrThrow('DATABASE_URL'),
+      max: config.get('DB_POOL_MAX', { infer: true }),
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 5_000,
     });

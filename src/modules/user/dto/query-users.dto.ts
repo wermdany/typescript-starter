@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { paginationSchema, trimmedShape } from '@/shared/validation.js';
+import { userRoleSchema } from './create-user.dto.js';
 
 /**
  * 用户分页列表查询参数。
@@ -15,7 +16,7 @@ import { paginationSchema, trimmedShape } from '@/shared/validation.js';
 export const queryUsersSchema = paginationSchema.extend(
   trimmedShape({
     keyword: z.string().min(1).max(50).optional(),
-    role: z.enum(['student', 'admin']).optional(),
+    role: userRoleSchema.optional(),
     sortBy: z
       .enum([
         'nickname',

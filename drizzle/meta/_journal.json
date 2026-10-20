@@ -15,6 +15,13 @@
       "when": 1792077351827,
       "tag": "0001_seed_users",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792486034234,
+      "tag": "0002_auth_sessions",
+      "breakpoints": true
     }
   ]
 }

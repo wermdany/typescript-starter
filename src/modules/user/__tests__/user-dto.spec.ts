@@ -314,8 +314,9 @@ describe('queryUsersSchema：schema 自身严格，宽容由 query 管道提供'
     );
   });
 
-  it('枚举值非法仍拒绝', () => {
-    expect(expectFail(queryUsersSchema, { role: 'teacher' })[0]?.path).toBe(
+  it('枚举值非法仍拒绝（teacher 已是合法角色，root 不在枚举里）', () => {
+    expect(queryUsersSchema.parse({ role: 'teacher' }).role).toBe('teacher');
+    expect(expectFail(queryUsersSchema, { role: 'root' })[0]?.path).toBe(
       'role',
     );
   });

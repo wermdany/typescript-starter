@@ -86,8 +86,14 @@ export class ZodValidationPipe<S extends ZodType> implements PipeTransform<
   ) {}
 
   transform(value: unknown, metadata?: ArgumentMetadata): z.output<S> {
-    const input =
-      metadata?.type === 'query' ? normalizeQueryValue(value) : value;
+    let input = metadata?.type === 'query' ? normalizeQueryValue(value) : value;
+
+    // 无 body 的请求（如 Cookie 模式的 POST /auth/refresh）不等于"非法输入"：
+    // Express 对没有 Content-Type 的 POST 不跑 body parser，body 是 undefined；
+    // 归一为空对象交给 schema 判定（可选字段 schema 会通过，必填字段照样报错）
+    if (input === undefined && metadata?.type === 'body') {
+      input = {};
+    }
 
     const result = this.schema.safeParse(input);
     if (!result.success) {

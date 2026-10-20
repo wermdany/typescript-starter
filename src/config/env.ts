@@ -50,6 +50,32 @@ export const envSchema = z.object({
   /** 是否把请求体写进日志（脱敏 + 截断），默认关闭 */
   LOG_BODY: envBoolean(false),
   DATABASE_URL: z.url(),
+
+  // ─── 数据库连接池 ───────────────────────────────────────────
+  /** 连接池上限 */
+  DB_POOL_MAX: z.coerce.number().int().positive().default(10),
+
+  // ─── 登录会话 ───────────────────────────────────────────────
+  /** accessToken 有效期（分钟）：短，泄露窗口小，由前端静默续期 */
+  AUTH_ACCESS_TTL_MINUTES: z.coerce.number().int().positive().default(120),
+  /** refreshToken 有效期（天）：长，决定"多久不操作才需要重新登录" */
+  AUTH_REFRESH_TTL_DAYS: z.coerce.number().int().positive().default(7),
+  /** 每次续期是否把 refreshToken 的有效期顺延（有活动就不掉线） */
+  AUTH_REFRESH_SLIDING: envBoolean(true),
+  /** 前端提前续期窗口（分钟）：剩余有效期低于它时主动刷新 */
+  AUTH_REFRESH_WINDOW_MINUTES: z.coerce.number().int().positive().default(5),
+  /** 单用户并发会话上限，超出时淘汰最久未使用的一条 */
+  AUTH_MAX_SESSIONS_PER_USER: z.coerce.number().int().positive().default(20),
+
+  // ─── 登录安全 ───────────────────────────────────────────────
+  /** 登录失败限流：窗口内最大失败次数（按 学号 + IP 统计） */
+  AUTH_LOGIN_MAX_ATTEMPTS: z.coerce.number().int().positive().default(10),
+  /** 登录失败限流的统计窗口（分钟） */
+  AUTH_LOGIN_WINDOW_MINUTES: z.coerce.number().int().positive().default(15),
+  /** 是否信任反向代理传来的 x-forwarded-for（默认不信任，客户端可伪造该头） */
+  AUTH_TRUST_PROXY: envBoolean(false),
+  /** refreshToken 是否经 HttpOnly Cookie 下发（关闭则退回纯 body/header 模式，供非浏览器客户端） */
+  AUTH_REFRESH_COOKIE: envBoolean(true),
 });
 
 export type Env = z.infer<typeof envSchema>;

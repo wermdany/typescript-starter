@@ -28,7 +28,9 @@ pnpm start:dev            # 监听 http://localhost:8000
 ```
 
 > `drizzle/0001_seed_users.sql` 是自定义迁移，会灌入 100,000 条拟真用户数据，
-> 其中学号 `2019010001` ~ `2019010003` 是密码为 `12345678` 的演示账号。
+> 用户数据由种子迁移生成（拟真数据）；**登录账号与密码不在代码/迁移里预置**，
+> 由部署方直接在数据库中为真实用户分配角色并写入 scrypt 密码哈希
+> （可用 `hashPassword()` 生成，存储格式 `scrypt$N$r$p$saltHex$hashHex`）。
 
 ## 环境变量
 
@@ -77,20 +79,61 @@ pnpm db:studio        # 可视化查看数据
   "errors": [{ "path": "email", "message": "无效的电子邮件地址" }] }
 ```
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| `POST` | `/users` | 创建用户 |
-| `GET` | `/users` | 分页列表（`page` / `pageSize` / `keyword` / `role` / `sortBy` / `order`） |
-| `GET` | `/users/by-student-no/:studentNo` | 按学号查询 |
-| `GET` | `/users/:id` | 按 ID 查询 |
-| `PATCH` | `/users/:id` | 更新资料（邮箱 / 昵称 / 角色 / 积分） |
-| `PATCH` | `/users/password/:id` | 修改密码（需提交 `oldPassword`，不符返回 401） |
-| `POST` | `/users/restore/:id` | 恢复软删除用户 |
-| `DELETE` | `/users/:id` | 软删除用户 |
+| 方法 | 路径 | 鉴权 | 说明 |
+| --- | --- | --- | --- |
+| `POST` | `/auth/login` | 公开 | 登录，签发双 token |
+| `POST` | `/auth/refresh` | 凭 refreshToken | 静默续期（一次性轮换） |
+| `POST` | `/auth/logout` | 登录 | 退出当前设备（幂等） |
+| `POST` | `/auth/sessions/revoke-all` | 登录 | 退出全部设备（`keepCurrent` 可保留本机） |
+| `GET` | `/auth/sessions` | 登录 | 我的登录设备（标 `current`） |
+| `DELETE` | `/auth/sessions/:id` | 登录 | 踢掉我的某台设备 |
+| `GET` | `/auth/login-logs` | 登录 | 我的登录记录 |
+| `GET` | `/auth/me` | 登录 | 当前身份 |
+| `GET` | `/users/health` | 公开 | 健康检查 |
+| `GET` | `/users/me` | 登录 | 当前用户资料 |
+| `POST` | `/users` | 管理员 | 创建用户 |
+| `GET` | `/users` | 管理员 | 分页列表（`page` / `pageSize` / `keyword` / `role` / `sortBy` / `order`） |
+| `GET` | `/users/by-student-no/:studentNo` | 管理员 | 按学号查询 |
+| `GET` | `/users/:id` | 登录 | 按 ID 查询 |
+| `PATCH` | `/users/:id` | 本人或管理员 | 更新资料（本人只能改昵称 / 邮箱） |
+| `PATCH` | `/users/password` | 登录 | 修改本人密码（需 `oldPassword`），踢掉其它设备 |
+| `PATCH` | `/users/password/:id` | 管理员 | 重置他人密码（免旧密码），踢掉其全部登录态 |
+| `POST` | `/users/restore/:id` | 管理员 | 恢复软删除用户 |
+| `DELETE` | `/users/:id` | 管理员 | 软删除用户（同时踢掉其登录态） |
+| `GET` | `/users/:id/sessions` | 管理员 | 某用户的登录设备 |
+| `DELETE` | `/users/sessions/:id` | 管理员 | 踢出某用户全部登录态 |
+| `DELETE` | `/users/:id/sessions/:sessionId` | 管理员 | 踢出某用户单个会话 |
+| `GET` | `/users/:id/login-logs` | 管理员 | 某用户的登录记录 |
 
 - 列表默认按修改时间（`updatedAt`）降序，`pageSize` 上限 100
 - 响应字段由 `src/modules/user/user.projection.ts` 的列白名单决定，不含 `passwordHash` / `deletedAt`
 - 分页响应：`{ items, total, page, pageSize, totalPages }`
+
+### 认证与授权
+
+双 token 方案（opaque token，服务端可即时吊销）：
+
+| 项 | 默认值 | 环境变量 |
+| --- | --- | --- |
+| accessToken 有效期 | 2 小时 | `AUTH_ACCESS_TTL_MINUTES` |
+| refreshToken 有效期 | 7 天，滑动续期 | `AUTH_REFRESH_TTL_DAYS` / `AUTH_REFRESH_SLIDING` |
+| 提前续期窗口 | 剩余 5 分钟 | `AUTH_REFRESH_WINDOW_MINUTES` |
+| 单用户并发会话上限 | 20（超出淘汰最旧） | `AUTH_MAX_SESSIONS_PER_USER` |
+| 登录失败限流 | 15 分钟内 10 次 → 429（按 学号+IP） | `AUTH_LOGIN_MAX_ATTEMPTS` / `AUTH_LOGIN_WINDOW_MINUTES` |
+| 信任代理的 XFF | 否 | `AUTH_TRUST_PROXY` |
+
+- **token 双通道**：
+  - `accessToken` → 响应体 JSON，前端放内存，请求带 `Authorization: Bearer`
+  - `refreshToken` → **HttpOnly Cookie**（`refresh_token`；`Path=/auth/refresh`、
+    `SameSite=Strict`、`HttpOnly`，生产加 `Secure`）——前端接触不到 RT 明文，XSS 偷不走；
+    响应体不含 RT
+  - 非浏览器客户端（App/脚本）设 `AUTH_REFRESH_COOKIE=false` 退回 body 传 RT 的模式
+- **静默续期**（前端）：收到 401 → `POST /auth/refresh`（Cookie 自动携带，无需 body）→
+  换新 accessToken → **重放原请求**。铁律：**并发 401 必须共享同一个刷新 Promise**——
+  并发双刷会让第二个请求带着已轮换的旧 RT，触发服务端"重放即吊销全部会话"
+- 401 的两种含义：AT 过期（刷新后重放，用户无感）/ RT 也失效（跳登录页）
+- 登录失败统一 401「学号或密码错误」（不区分账号是否存在，且两条路径耗时对齐）
+- 登录（成功/失败/限流）与所有踢出操作都记录审计：`auth_login_logs` / `auth_sessions.revoked_reason`
 
 ### 密码规则
 

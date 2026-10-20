@@ -1,9 +1,13 @@
 import { z } from 'zod';
 
 import { trimmedShape } from '@/shared/validation.js';
+import { userRoleSchema } from './create-user.dto.js';
 
 /**
- * 更新用户资料请求体（密码走 `PATCH /users/password/:id`）。
+ * 更新用户资料请求体（密码走 `PATCH /users/password`）。
+ *
+ * 字段权限走白名单（`update-policy.ts`）：本人只能改 `email` / `nickname`，
+ * `role` / `points` 仅管理员可改；schema 本身不感知权限。
  *
  * 字段均为可选，语义严格：
  *
@@ -18,7 +22,7 @@ export const updateUserSchema = z
     trimmedShape({
       email: z.email().optional(),
       nickname: z.string().min(1).max(50).optional(),
-      role: z.enum(['student', 'admin']).optional(),
+      role: userRoleSchema.optional(),
       points: z.number().int().nonnegative().optional(),
     }),
   )

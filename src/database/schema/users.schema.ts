@@ -11,7 +11,11 @@ import {
 
 import { timestamps } from './columns.js';
 
-export const userRoleEnum = pgEnum('user_role', ['student', 'admin']);
+export const userRoleEnum = pgEnum('user_role', [
+  'student',
+  'teacher',
+  'admin',
+]);
 
 export const users = pgTable(
   'users',

@@ -9,8 +9,8 @@ export const PASSWORD_MAX_LENGTH = 18;
 /**
  * **旧密码**（`oldPassword`）的长度上限，与 {@link PASSWORD_MAX_LENGTH} 分开。
  *
- * 旧密码是**校验**而非**设置**：库里存在规则收窄前设定的密码（种子演示账号的
- * `12345678`、更长的历史密码），套用新规则会把这些用户锁在门外。
+ * 旧密码是**校验**而非**设置**：库里可能存在规则收窄前设定的历史密码，
+ * 套用新规则会把这些用户锁在门外。
  * 128 只是 scrypt 输入规模的兜底，不是安全规则。
  */
 export const LEGACY_PASSWORD_MAX_LENGTH = 128;

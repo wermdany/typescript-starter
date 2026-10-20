@@ -5,6 +5,9 @@ import { passwordSchema, trimmedShape } from '@/shared/validation.js';
 /** 学号基础约束（创建接口与 `:studentNo` 路径参数复用） */
 export const studentNoSchema = z.string().min(1).max(20);
 
+/** 角色枚举（与 `users.schema.ts` 的 `userRoleEnum` 保持一致，创建/更新/筛选共用） */
+export const userRoleSchema = z.enum(['student', 'teacher', 'admin']);
+
 /**
  * 创建用户请求体。
  *
@@ -24,7 +27,7 @@ export const createUserSchema = z.object(
     /** 明文密码，服务端 scrypt 哈希后存储；规则与修改密码共用 */
     password: passwordSchema,
     /** 角色，默认学生 */
-    role: z.enum(['student', 'admin']).default('student'),
+    role: userRoleSchema.default('student'),
     /** 积分，默认 0 */
     points: z.number().int().nonnegative().default(0),
   }),

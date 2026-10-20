@@ -50,8 +50,13 @@ src/
 ├── __tests__/                    # 应用级测试（真实启一个应用，mock 掉数据库）
 ├── config/
 │   ├── env.ts                    # 全部环境变量的 zod schema（唯一出处）+ loadEnv()
+│   ├── auth.config.ts            # 认证配置对象（由 env 派生，模块与用例层只认它）
 │   └── __tests__/
-├── common/api-response/api-response.ts     # 响应契约类型 + 默认文案常量（只放类型）
+├── common/
+│   ├── api-response/api-response.ts  # 响应契约类型 + 默认文案常量（只放类型）
+│   └── auth/                     # 认证契约（纯类型/纯函数，不依赖 Nest 与业务模块）
+│       ├── auth.contract.ts      #   AuthenticatedUser / 认证请求类型 / 401 403 429 文案
+│       └── request-augment.d.ts  #   Express.Request.user 的类型增补
 ├── shared/                       # 常用工具：从 barrel 引入，不要记具体文件名
 │   ├── common.ts                 #   @ApiMessage / @SkipTransform / 响应类型 / paginate / 哈希
 │   ├── validation.ts             #   trimmed / trimmedShape / passwordSchema / paginationSchema
@@ -59,6 +64,11 @@ src/
 │   ├── pagination/               #   paginate() + paginationSchema
 │   ├── validation/               #   trimmed/trimmedShape、passwordSchema（含 __tests__/）
 │   ├── crypto/password.scrypt.ts #   scrypt 哈希/校验
+│   ├── auth/                     #   认证基础件（不依赖任何业务模块）
+│   │   ├── token.ts              #     generateToken / hashToken / 空哈希（假校验对齐耗时）
+│   │   ├── client-info.ts        #     UA → 设备摘要、XFF → 客户端 IP
+│   │   ├── decorators/           #     @Public / @AdminOnly / @CurrentUser
+│   │   └── auth.guard.ts         #     AuthGuard（纯逻辑）+ HttpAuthGuard（APP_GUARD）
 │   └── http/                     #   全局 HTTP 组件：HttpExceptionFilter / TransformInterceptor /
 │                                 #   ZodValidationPipe（只由 app.config.ts 与 Controller 用，不进 barrel）
 ├── database/                     # @Global 数据库模块
@@ -69,17 +79,55 @@ src/
 │   ├── failure-summary.ts        # 失败摘要的类型与 res.locals 键名（过滤器与访问日志共用）
 │   └── __tests__/
 ├── startup/local-addresses.ts    # 启动时枚举可访问地址
-└── modules/<domain>/             # 业务模块（当前只有 user）
+└── modules/<domain>/             # 业务模块（当前有 user、auth）
     ├── <domain>.module.ts
     ├── <domain>.controller.ts
-    ├── <domain>.service.ts
-    ├── <domain>.projection.ts    # 对外字段白名单 + XxxResponse 类型
-    ├── dto/                      # zod schema + z.infer 类型
-    └── __tests__/                # 该模块的测试
+    ├── <domain>.service.ts       # 或按用例拆成多个 XxxService
+    ├── dto/                      # zod schema + z.infer 类型 + 对外字段白名单
+    ├── <subdomain>/              # 大模块按"变更原因"拆子域（见 auth 的用法）
+    │   ├── <name>.service.ts     #   仓储 / 用例编排（统一叫 service）
+    │   ├── <name>.controller.ts  #   子域自己的接口
+    │   ├── dto/                  #   子域的 DTO 与投影
+    │   └── <subdomain>.module.ts #   子域只 import 依赖方的 Module，不散引文件
+    └── __tests__/                # 测试跟着被测代码所在子域走
 ```
 
+**模块内分包规则**（以 `modules/auth` 为准）：
+
+- 源文件 ≥ 15 个的模块必须按子域分包，平铺会让"谁依赖谁"不可读
+- 子域按**变更原因**划分（auth：`token/` 签发时效、`session/` 会话与中间件、
+  `login/` 登录策略、`log/` 登录审计），不按技术分层划
+- **子域间只 import 对方的 Module 并写进 `imports`，禁止跨子域散引 service 文件** ——
+  循环依赖（session ↔ login）会在 ESM 下以 TDZ 崩溃，聚合层（`AuthDependenciesModule`）
+  负责把子模块组装到一起
+- **Controller 按子域拆分**（`session.controller.ts` / `login-log.controller.ts` 各归其子域，
+  只有跨子域的入口路由留在模块根部）—— 找接口先找子域目录，不要都堆在一个大 controller 里
+  让人翻半天
+- 依赖倒置优先于引包：子域需要"查用户/查审计"这类跨子域数据时，优先自备最小查询
+  （如 `SessionService.userExists`），而不是反向 import 别的子域
+- **角色判定只走 `isAdmin()`**（`@/common/auth/auth.contract.js`，barrel 亦有导出）：
+  禁止手写 `role === 'admin'` / `role !== 'admin'` —— 角色层级或权限点演进时只改契约一处
+- **字段级修改权限用白名单**（范例 `modules/user/update-policy.ts`，就近放 user 目录）：角色 → 可改字段集
+  的映射表 + `filterUpdatable()` 纯函数过滤，**不在 service 里堆 if/else 逐字段判断**。
+  规则：新字段默认不可改（显式加入白名单才开放，与投影白名单同一取向）；
+  判定与业务流程（校验 → 更新 → 吊销）分离，判定本身可单测、可导出给前端
+
+**文件命名（对齐 NestJS 官方 schematics 约定）**：后缀**只用五种**——
+`*.module.ts` / `*.controller.ts` / `*.service.ts` / `*.dto.ts` / `*.middleware.ts`，
+kebab-case。禁止自造后缀（`*.use-case.ts` / `*.projection.ts` / `*.handler.ts` /
+`*.policy.ts` 等一律不用）：
+
+- 用例编排 → `xxx.service.ts`（service 就是业务逻辑层，不区分"仓储/用例"后缀；
+  一个域里仓储和用例都叫 service，靠类名与注释区分职责）
+- 对外字段白名单 → 收进该域的 `dto/xxx.dto.ts`（投影就是 DTO 契约的一部分）
+- 装配类小封装 → 并入它装配的目标文件（如中间件工厂 + 容器装配同文件）
+- 纯工具函数 → 就近放使用它的子域目录（不带类型后缀，如 `refresh-cookie.ts` / `update-policy.ts`）
+
+文件名读法 = 目录（域）+ 文件名（职责）：`session/session.service.ts`、
+`login/refresh.service.ts` —— 找代码先找域目录，再看 service/dto/controller。
+
 **分层**：Controller 只做路由与参数校验；Service 承载全部业务逻辑（SQL、哈希、异常转换）；
-`<domain>.projection.ts` 以列白名单界定对外字段；DTO 用 zod schema 定义并导出 `z.infer` 类型。
+对外字段由 `dto/` 里的列白名单界定；DTO 用 zod schema 定义并导出 `z.infer` 类型。
 
 **依赖方向**（只允许自下而上）：
 
@@ -96,6 +144,16 @@ src/
 ---
 
 ## 3. 常用命令
+
+**新增依赖必须由用户本人执行安装**（AI 助手只改 `package.json` / 给出安装命令，
+不运行 `pnpm add` / `npm install` / `pnpm install`）：沙箱环境对 pnpm store 与
+网络代理的限制会导致半失败状态（依赖声明了但 node_modules 缺失/损坏），
+排查成本高于让用户直接安装。用户装完依赖后 AI 再继续后续工作。
+
+**单轮对话内完成的需求，不写单元测试 / e2e 测试，也不运行它们做验证**
+（无论过程中是否已写过测试代码）——只做其余验证（`pnpm lint` / `pnpm build` /
+运行中服务的端到端 curl）。**例外**：用户明确要求写测试或跑测试时除外。
+跨多轮的大需求（用户明示"做完整方案/全部测试"）不受此条约束。
 
 ```bash
 pnpm install          # 安装依赖
@@ -139,12 +197,20 @@ pnpm db:studio        # 可视化查看数据
   **禁止**业务代码直接读 `process.env`
 - `.env` 由用户自行维护，不入库；`.env.local` 已 gitignore
 
-当前变量：`NODE_ENV`、`PORT`、`LOG_LEVEL`、`LOG_FILE`、`LOG_BODY`、`DATABASE_URL`（必填）。
+当前变量：`NODE_ENV`、`PORT`、`LOG_LEVEL`、`LOG_FILE`、`LOG_BODY`、`DATABASE_URL`（必填）、
+`DB_POOL_MAX`、`AUTH_ACCESS_TTL_MINUTES`、`AUTH_REFRESH_TTL_DAYS`、`AUTH_REFRESH_SLIDING`、
+`AUTH_REFRESH_WINDOW_MINUTES`、`AUTH_MAX_SESSIONS_PER_USER`、`AUTH_LOGIN_MAX_ATTEMPTS`、
+`AUTH_LOGIN_WINDOW_MINUTES`、`AUTH_TRUST_PROXY`。
+
+**账号数据是真实数据**：不做演示账号注入/校准。登录账号、角色与密码哈希由部署方
+直接在数据库中维护（哈希用 `hashPassword()` 生成，格式 `scrypt$N$r$p$saltHex$hashHex`）。
 
 **例外**：`main.ts` 用 `loadEnv()` 直接取配置 —— `FileLogger` 必须早于 DI 容器就绪
 （要注入 `NestFactory.create`），此时拿不到 `ConfigService`。其余代码一律用 `ConfigService`。
 
-`DB_POOL_MAX` 不在 schema 里，由 `DatabaseService` 通过 `config.get('DB_POOL_MAX', 10)` 读取。
+**认证配置不进业务代码**：`ConfigService` 只在 `AuthConfigService` 里读一次，转成
+`AuthConfig`（`src/config/auth.config.ts`）注入给会话/用例层。业务代码拿的是配置对象，
+不感知环境变量名；改默认值、加配置项只动 `auth.config.ts` 一处。
 
 ---
 
@@ -316,6 +382,24 @@ const result = await paginate(
   `email` 由部分唯一索引 `users_email_alive_idx`（仅覆盖未删行）保证，
   因此恢复软删用户可能因 email 冲突 409
 - 多表一致性操作用 `DatabaseService.transaction()`，不要手工 BEGIN
+- **"一次请求多次写"必须包事务**（判定标准：两个写操作之间存在业务不变量）：
+  - 改用户 + 吊销其会话（改密 / 删人）—— 密码已改但旧会话有效、用户已删但 token 有效，
+    正是写操作要终止的风险，非原子等于白写
+  - 建会话 + 写登录审计 —— 有会话没审计，审计流水出现缺口
+  - 吊销全部会话 + 写重放审计 —— 同上
+  - 会话上限淘汰 + 插入新会话 —— 并发登录下"查-淘汰-插"三段式会双双判未超限或重复淘汰
+- **仓储写方法接受可选 `executor`**（drizzle 事务句柄）：事务外默认用 `this.db`，
+  事务内传 `tx` 保证同一连接。用例层这样组合：
+  ```ts
+  await this.database.transaction(async (tx) => {
+    const user = await tx.update(users)...;
+    await this.sessions.revokeAllForUser(id, 'password_changed', { executor: tx });
+  });
+  ```
+  不要在事务回调里做 CPU 密集操作（scrypt 哈希在**进事务之前**算好），占用连接的时间
+  越短，连接池越健康
+- 读多写一且无不变量约束的流程（如列表 + 计数）不需要事务，`paginate()` 的并行查询
+  就是无事务的正确形态
 - schema 变更后开发期用 `pnpm db:push`，需要留痕再用 `db:generate` + `db:migrate`
 - 派生类型用 `typeof users.$inferSelect` / `$inferInsert`，新增 schema 在 `schema/index.ts` 导出
 
@@ -341,8 +425,8 @@ const result = await paginate(
 
 - 白名单而非黑名单：黑名单挡不住 emoji、Unicode 空白（`\u200b`）与同形字符
 - 规则只在 schema 层，数据库结构不变（只存哈希），不需要迁移
-- ⚠️ **`oldPassword` 不要套 `passwordSchema`**：库里存在规则收窄前设定的密码
-  （种子演示账号 `12345678` 等），用新规则卡旧密码会把老用户锁在门外。
+- ⚠️ **`oldPassword` 不要套 `passwordSchema`**：那是"设密码"的规则；库里可能存在
+  规则收窄前设定的历史密码，用新规则卡旧密码会把老用户锁在门外。
   旧密码只要求非空 + `LEGACY_PASSWORD_MAX_LENGTH`（128，仅作 scrypt 输入规模兜底）
 
 ### 修改密码：`PATCH /users/password/:id`
@@ -464,7 +548,7 @@ const result = await paginate(
 
 1. `pnpm lint`
 2. `pnpm build`（看退出码；tsc 默认即使报错也会 emit）
-3. `pnpm test`
+3. `pnpm test`（**单轮对话完成的需求跳过此步**，见第 3 节；仅当用户明确要求时执行）
 4. 在已运行的服务器上端到端验证（第 0 节）：
    - `lsof -nP -iTCP:8000 -sTCP:LISTEN` 确认服务在跑，等 1~3 秒再 curl
    - 覆盖成功路径 + 400（带 `errors`）+ 404 + 409（唯一冲突）+ 401（旧密码错误，仅改密接口）
@@ -528,9 +612,9 @@ const result = await paginate(
 1. `database/schema/<domain>.schema.ts` —— 建表（`...timestamps()`）+ 索引；在 `database/schema/index.ts` 导出
 2. `dto/*.ts` —— zod schema（`create` / `update` / 列表 query 用 `paginationSchema.extend(trimmedShape({...}))`，
    默认排序 `updatedAt` 降序）+ 导出 `z.infer` 类型
-3. `<domain>.projection.ts` —— `xxxPublicColumns`（`as const`）+
+3. `dto/<domain>.dto.ts` —— 对外字段白名单 `xxxPublicColumns`（`as const`，与 zod schema 同文件或同目录）+
    `type XxxResponse = Pick<Xxx, keyof typeof xxxPublicColumns>`；Service 的 `select` / `returning` 一律传它
-   （不要 `Omit`、不要映射函数）；补 `__tests__/<domain>.projection.spec.ts` 冻结字段集合
+   （不要 `Omit`、不要映射函数）；补投影字段冻结的测试
 4. `<domain>.service.ts` —— 业务逻辑；查询带 `isNull(deletedAt)`；`updatedAt` 手动更新；
    唯一冲突转 409（先解包 `cause`）；分页/哈希从 `@/shared/common.js` 取
 5. `<domain>.controller.ts` —— REST 路由 + `ZodValidationPipe`（`@/shared/http/zod-validation.pipe.js`）
@@ -539,3 +623,71 @@ const result = await paginate(
 6. `<domain>.module.ts` —— 声明 controller/service（`DatabaseModule` 是 `@Global`，无需 import）
 7. 在 `app.module.ts` 的 `imports` 注册模块
 8. 按第 12 节验证；测试写到 `<domain>/__tests__/*.spec.ts`，只测本模块代码
+9. 建表写法见第 15 节，逐项对齐 `users.schema.ts`
+
+---
+
+## 15. Schema 规范（`pgTable` 写法）
+
+所有 `src/database/schema/*.schema.ts` 一律对齐 `users.schema.ts`，不允许各写各的。
+
+### 15.1 骨架
+
+```ts
+import { sql } from 'drizzle-orm';
+import { integer, index, pgTable, varchar } from 'drizzle-orm/pg-core';
+
+import { timestamps } from './columns.js';
+import { users } from './users.schema.js';
+
+export const xxx = pgTable(
+  'xxx',                                        // ① 表名：小写 snake_case
+  {
+    id: integer().primaryKey().generatedAlwaysAsIdentity(),
+    userId: integer('user_id')                  // ② 业务列：显式物理列名
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    title: varchar('title', { length: 100 }).notNull(),
+    ...timestamps(),                            // ③ 通用时间戳，必须函数调用展开
+  },
+  (t) => [                                      // ④ 索引：函数式返回数组
+    index('xxx_user_idx').on(t.userId),
+  ],
+);
+
+export type Xxx = typeof xxx.$inferSelect;      // ⑤ 两个派生类型，命名固定
+export type NewXxx = typeof xxx.$inferInsert;
+```
+
+### 15.2 硬性规则
+
+1. **显式传物理列名**：`varchar('student_no')`、`integer('points')`、`timestamp('expires_at')`。
+   表里每一列都显式写，不依赖 drizzle 的列名推断 —— "有的列传、有的列不传"会让新表与
+   `users` 长得不一样。例外只有 `integer().primaryKey()`（与 `users.id` 现状一致）。
+2. **列键 camelCase ↔ 物理列 snake_case**，一一对应；派生类型名用 `表名单数`（`users` → `Users`）。
+3. **时间戳只来自 `...timestamps()`**（`createdAt` / `updatedAt` / `deletedAt`），
+   **禁止**在业务 schema 里手工定义这三个列。必须写成函数调用展开 —— 列 builder 单次使用，
+   共享对象会让多表列名错乱。
+4. **软删除统一用 `deletedAt`**，不加 `is_deleted` 之类的布尔列；读路径一律 `isNull(deletedAt)`。
+5. **索引一律走第三个参数的函数式返回数组**，显式命名：
+   - 普通索引 `表名_列名_idx`
+   - 部分唯一索引 `表名_列名_alive_idx`，条件写 `sql\`${t.deletedAt} IS NULL\``
+   - 列级唯一用 `.unique()`（如 `student_no`），只有"软删后允许复用"才用部分唯一索引
+6. **外键**用 `references(() => users.id, { onDelete })`：
+   归属类数据（会话、子资源）`'cascade'`；审计类数据（登录日志）`'set null'`，用户删除后仍保留。
+7. **枚举**用 `pgEnum('<名>', ['a', 'b'])`，列上显式传列名（`role: userRoleEnum('role')`）；
+   新增枚举值需要迁移（`ALTER TYPE ... ADD VALUE`）。
+8. 每张表在 `schema/index.ts` 导出；对外字段由 `<domain>.projection.ts` 的列白名单界定，
+   **token 哈希、密码哈希永不进白名单**。
+9. 改完：`pnpm build` → `pnpm db:generate` → 人工检查迁移 SQL → `pnpm db:migrate`。
+
+### 15.3 反例（不要这样写）
+
+```ts
+// ❌ 省略列名，和 users 不一致
+passwordHash: varchar({ length: 255 }).notNull(),
+// ❌ 手工时间戳
+createdAt: timestamp('created_at').notNull().defaultNow(),
+// ❌ 索引写成对象或省略命名
+}, { indexes: [index().on(...)] });
+```
