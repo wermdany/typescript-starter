@@ -1,24 +1,16 @@
 import { z } from 'zod';
 
-import { trimmed } from '../../../common/validation/trimmed.js';
+import { trimmed } from '@/shared/validation.js';
 import { studentNoSchema } from './create-user.dto.js';
 
 /**
- * `:id` 路径参数 schema（数字 ID，复用于全部 :id 路由）。
+ * `:id` 路径参数 schema（复用于全部 :id 路由）。
  *
- * 路径参数是**顶层字符串**，不在管道层 `normalizeQueryValue` 的覆盖范围内
- * （它只处理 query，且只递归普通对象），因此与 `:studentNo` 一样显式套
- * {@link trimmed} 做首尾空白规范化；空白清掉后为空串，由下面的 `/^\d+$/` 拦下。
+ * 路径参数是顶层字符串，query 归一化与 shape 包装都覆盖不到，因此显式套 `trimmed()`。
  *
- * 为什么不用 `z.coerce.number()`：
- *
- * 1. `Number('') === 0`，空串 / 纯空白会被误报成 `Too small: expected number to be >0`
- *    —— 看不出到底是"没传"还是"传了 0"，语义含混
- * 2. `Number()` 解析过于宽松：`'0x10'` → 16、`'1e0'` → 1、`'+1'` / `'1.'` / `'2.0'` 照收。
- *    这里用 `/^\d+$/` 前置收紧，非纯数字统一报「ID 必须是正整数」
- *
- * 数字域校验放在内层（`.pipe`）：`'0'` / `'000'` 由 `.positive()` 拦下；
- * 超出安全整数的数字串（20 位以上）报 `Too big`，不会带着失真浮点数进 DB。
+ * 不用 `z.coerce.number()`：`Number('') === 0` 会把空值误报成 `too_small`，
+ * 且 `Number()` 对 `'0x10'` / `'1e0'` 这类解析过于宽松。先用 `/^\d+$/` 收紧，
+ * 再 `.pipe()` 到数字域校验。
  */
 export const idParamSchema = trimmed(
   z
@@ -33,10 +25,7 @@ export type IdParam = z.infer<typeof idParamSchema>;
 /**
  * `:studentNo` 路径参数 schema。
  *
- * 路径参数是顶层字符串，管道层的 query 归一化与 shape 级包装都覆盖不到它，
- * 因此这里显式使用 `trimmed`（只去首尾空白；清完为空则由 `min(1)` 拒绝）。
- * 同时补上长度约束：学号列为 varchar(20)，超出长度会触发 PG `22001`
- * 并冒泡为 500（`handlePgError` 只处理 23505），校验前置后变为 400。
+ * 长度约束前置后，超长学号报 400，而不是触发 PG `22001` 冒泡成 500。
  */
 export const studentNoParamSchema = trimmed(studentNoSchema);
 

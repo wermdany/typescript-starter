@@ -19,31 +19,29 @@ const DETAIL_FIELDS = [
 ] as const;
 
 export interface FormatErrorOptions {
-  /** 首层错误是否输出完整堆栈（cause 链只输出单行摘要，不堆叠多层堆栈） */
+  /** 首层错误是否输出完整堆栈（cause 链只输出单行摘要） */
   includeStack?: boolean;
 }
 
 /**
- * 把任意"抛出物"格式化为日志可读文本，并**展开 `cause` 链**。
+ * 把任意"抛出物"格式化为日志文本，并**展开 `cause` 链**。
  *
- * **为什么必须展开 cause：** 很多库把"真正失败的原因"包在外层错误里 ——
- * drizzle 的 `DrizzleQueryError`（`message` 只有 SQL 文本 + 空的 `params:`，
- * 真实原因在 `cause`）、undici 的 `TypeError: fetch failed`（真正原因在 `cause`）等。
- * 只读最外层 message/stack，日志里就只剩「某个查询失败了」，
- * 看不到「连接被掐断 / 认证失败 / 超时 / 表不存在」这类真正可行动的信息。
- * 本项目 `UserService.handlePgError` 早已在业务侧解包 `err.cause`，
- * 但**日志侧**此前没有解包，2026-10-16 的一次 500 排查就是卡在这里。
+ * 必须展开 cause：drizzle 的 `DrizzleQueryError` message 里只有 SQL 文本，
+ * 真实原因（连接被掐断 / 表不存在 / 超时）全在 `cause` 上；只看外层 message，
+ * 日志里就找不到可行动的信息。
  *
- * **为什么不直接把异常当参数传给 Logger：** `@nestjs/common` 的 ConsoleLogger 会把第二个
- * 字符串参数解析成 **context**（见 `getContextAndStackAndMessagesToPrint`），
- * 传 `String(err)` 会让异常内容错位。统一先格式化成一个字符串再交给 Logger 最稳。
+ * 统一先格式化成字符串再交给 Logger —— ConsoleLogger 会把第二个字符串参数
+ * 当作 context 解析。
  *
- * - 首层 `Error`：`includeStack` 时取 `stack`，否则取 `message`（保持调用方的简写习惯）
- * - cause 链：每层一行，前缀 `caused by:`，取 `Name: message`（不堆叠多层堆栈）
- * - 驱动错误：额外摘出 `code`/`detail`/`constraint` 等字段 —— 比 message 更有诊断价值
- * - 非 Error（字符串 / 普通对象 / undefined）：用 `util.inspect`，避免 `String({})` 变成 `[object Object]`
+ * - 首层 `Error`：`includeStack` 时取 `stack`，否则取 `message`
+ * - cause 链：每层一行，前缀 `caused by:`，取 `Name: message`
+ * - 驱动错误：额外摘出 `code` / `detail` / `constraint` 等字段
+ * - 非 Error：用 `util.inspect`，避免 `String({})` 变成 `[object Object]`
  */
-export function formatError(error: unknown, options: FormatErrorOptions = {}): string {
+export function formatError(
+  error: unknown,
+  options: FormatErrorOptions = {},
+): string {
   const segments: string[] = [];
   const seen = new Set<unknown>();
   let current: unknown = error;
@@ -74,21 +72,22 @@ export function formatError(error: unknown, options: FormatErrorOptions = {}): s
 /**
  * 把多行文本压成单行。
  *
- * 访问日志行必须「一次请求 = 一行」：库抛出的 message 本身常带换行
- * （如 drizzle 的 `... is null\nparams: `），不压平会把一行日志劈成两半，
- * 也会让依赖「一行一事件」的 grep / 日志采集错位。
+ * 访问日志要求「一次请求 = 一行」：库异常的 message 常带换行，不压平会劈开日志行，
+ * 让依赖「一行一事件」的 grep / 日志采集错位。
  */
 export function toSingleLine(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
 function isErrorLike(value: unknown): value is object {
-  return value instanceof Error || (typeof value === 'object' && value !== null);
+  return (
+    value instanceof Error || (typeof value === 'object' && value !== null)
+  );
 }
 
 /**
- * 首层错误保持调用方习惯的简写（无堆栈时只取 `message`，业务异常本就是人写的短句）；
- * cause 链上的库错误取 `Name: message`，因为光看 message 往往分不清是谁抛的。
+ * 首层错误保持简写（业务异常本就是人写的短句）；cause 链上的库错误取
+ * `Name: message`，因为光看 message 分不清是谁抛的。
  */
 function describe(value: unknown, isRoot: boolean, withStack: boolean): string {
   if (!(value instanceof Error)) return inspect(value);

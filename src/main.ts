@@ -1,29 +1,27 @@
 import { Logger } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
 import { z } from 'zod';
 import { zhCN } from 'zod/locales';
 
-import { AppModule } from './app.module.js';
+import { loadEnv } from '@/config/env.js';
+import { formatError } from '@/logger/error-format.js';
+import { FileLogger } from '@/logger/file-logger.js';
+import { getLogLevels } from '@/logger/log-levels.js';
+import { createApp } from './server.js';
 import {
   describeBoundAddress,
   listAccessibleUrls,
-} from './common/startup/local-addresses.js';
-import { loadEnv } from './config/env.js';
-import { accessLogMiddleware } from './logger/access-log.middleware.js';
-import { formatError } from './logger/error-format.js';
-import { FileLogger } from './logger/file-logger.js';
-import { getLogLevels } from './logger/log-levels.js';
-import { registerProcessErrorHandlers } from './logger/process-error.js';
-import { traceContextMiddleware } from './logger/trace.middleware.js';
+} from '@/startup/local-addresses.js';
 
+// 校验报错统一输出中文
 z.config(zhCN());
 
-const startup = new Logger('Bootstrap'); // 与下方 catch 同 context，便于一把 grep
+/** 与 catch 块同 context，便于按 `[Bootstrap]` 检索启动相关日志 */
+const startup = new Logger('Bootstrap');
 
 async function bootstrap() {
   const startedAt = performance.now();
 
-  // 日志配置要早于 DI 容器（FileLogger 直接注入 create），故复用同一份 zod schema
+  // FileLogger 必须早于 DI 容器，只能在这里直接取配置（同一份 envSchema）
   const env = loadEnv();
 
   const logger = new FileLogger({
@@ -31,25 +29,10 @@ async function bootstrap() {
     filePath: env.LOG_FILE, // 空串 = 只输出控制台
   });
 
-  // 注入 create 而非事后 useLogger：create 阶段的日志早于 useLogger，只有这样才能一并落盘
-  const app = await NestFactory.create(AppModule, { logger });
-
-  // ⚠️ 顺序不可换，且都必须早于 listen()：
-  // 1) traceContextMiddleware 先建请求上下文（app.use 即时转发，早于 init() 里的 body parser，
-  //    才能让 malformed JSON 的 400 / 未命中路由的 404 也拿到 traceId）
-  // 2) accessLogMiddleware 紧随其后 —— 它在入口捕获 traceId，供响应收尾时写 access 行；
-  //    放到 trace 之前就会丢 traceId
-  app.use(traceContextMiddleware);
-  app.use(accessLogMiddleware);
-
-  // 进程级兜底要在 logger 接管之后注册，否则 new Logger() 会落到默认 logger
-  registerProcessErrorHandlers();
-  app.enableShutdownHooks();
-
+  const app = await createApp(logger);
   await app.listen(env.PORT);
 
-  // 只借 getUrl() 的协议前缀：它的 host 会把 IPv6 通配 '::' 错映射成 '[::1]'，
-  // 局域网地址由 listAccessibleUrls() 自行枚举
+  // 只借 getUrl() 的协议前缀：它的 host 会把 IPv6 通配 '::' 错映射成 '[::1]'
   const baseUrl = await app.getUrl();
   const protocol = baseUrl.slice(0, baseUrl.indexOf('://'));
 

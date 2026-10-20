@@ -11,9 +11,8 @@ import {
   Query,
 } from '@nestjs/common';
 
-import { ApiMessage } from '../../common/decorators/api-message.decorator.js';
-import { type PageResponse } from '../../common/pagination/paginate.js';
-import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe.js';
+import { ApiMessage, type PageResponse } from '@/shared/common.js';
+import { ZodValidationPipe } from '@/shared/http/zod-validation.pipe.js';
 import {
   changePasswordSchema,
   type ChangePasswordDto,
@@ -33,7 +32,7 @@ import { UserService } from './user.service.js';
 /**
  * 用户管理接口。
  *
- * 注意：静态段路由（by-student-no）必须声明在 `:id` 路由之前。
+ * 静态段路由（by-student-no）必须声明在 `:id` 路由之前。
  */
 @Controller('users')
 export class UserController {
@@ -83,14 +82,9 @@ export class UserController {
     return this.userService.update(id, dto);
   }
 
-  /**
-   * 修改密码。
-   *
-   * 必须同时提交旧密码（`oldPassword`）——服务端比对存储的 scrypt 哈希，
-   * 不符返回 401（`success: false`，无 `errors`）。见 AGENTS.md 第 9 节。
-   */
+  /** 修改密码：旧密码不符返回 401 */
   @ApiMessage('密码已修改')
-  @Patch(':id/password')
+  @Patch('password/:id')
   changePassword(
     @Param('id', new ZodValidationPipe(idParamSchema)) id: IdParam,
     @Body(new ZodValidationPipe(changePasswordSchema)) dto: ChangePasswordDto,
@@ -100,7 +94,7 @@ export class UserController {
 
   /** 恢复软删除用户 */
   @ApiMessage('恢复成功')
-  @Post(':id/restore')
+  @Post('restore/:id')
   restore(
     @Param('id', new ZodValidationPipe(idParamSchema)) id: IdParam,
   ): Promise<UserResponse> {

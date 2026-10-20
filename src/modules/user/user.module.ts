@@ -3,11 +3,7 @@ import { Module } from '@nestjs/common';
 import { UserController } from './user.controller.js';
 import { UserService } from './user.service.js';
 
-/**
- * 用户管理模块。
- *
- * DrizzleModule 为 @Global，无需在此 import 即可注入 DrizzleService。
- */
+/** 用户管理模块（DatabaseModule 为全局模块，无需 import） */
 @Module({
   controllers: [UserController],
   providers: [UserService],

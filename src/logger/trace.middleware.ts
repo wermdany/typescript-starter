@@ -12,14 +12,11 @@ import {
 /**
  * 请求上下文中间件：解析/生成 traceId → 挂到 `req` → 建立异步上下文 → 回写响应头。
  *
- * **注册位置有讲究**：必须在 `main.ts` 里用 `app.use()`、且在 `app.listen()` 之前，
- * 而不是走 `NestModule.configure()`。Nest 的 `NestApplication.init()` 会先注册内置
- * body parser（`registerParserMiddleware()`）再注册用户中间件（`registerRouter()`），
- * 而 `app.use()` 是立即挂到 express 上的 —— 只有早注册才能让本中间件排在 body parser
- * 之前，从而「malformed JSON 的 400」「未命中路由的 404」这类请求也拿得到 traceId。
+ * 必须在 `main.ts` 里 `app.use()`，且早于 `listen()`：Nest 在 `init()` 里先注册
+ * body parser 再注册路由，而 `app.use()` 是即时挂载，只有早注册才能排在 body parser
+ * 之前，让 malformed JSON 的 400、未命中路由的 404 也拿得到 traceId。
  *
- * 入站 traceId 优先于生成：调用方或网关可带 `x-trace-id` / `x-request-id` 进来，
- * 于是能"先知道 traceId，再去业务代码里设条件断点"。
+ * 入站 traceId 优先：`x-trace-id` → `x-request-id` → 都没有才生成 UUID。
  */
 export function traceContextMiddleware(
   req: Request,

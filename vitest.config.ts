@@ -8,6 +8,10 @@ export default defineConfig({
   test: {
     globals: true,
     root: './',
-    include: ['**/*.spec.ts'],
+    // 测试与被测代码同目录，统一放 __tests__
+    include: ['src/**/__tests__/**/*.spec.ts'],
+    coverage: {
+      exclude: ['**/__tests__/**'],
+    },
   },
 });
