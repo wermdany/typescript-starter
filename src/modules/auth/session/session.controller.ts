@@ -16,8 +16,9 @@ import type { Response } from 'express';
 import { ApiMessage, type PageResponse } from '@/shared/common.js';
 import { ZodValidationPipe } from '@/shared/http/zod-validation.pipe.js';
 import {
-  AdminOnly,
+  Authenticated,
   CurrentUser,
+  RequirePermission,
   type AuthenticatedUser,
 } from '@/shared/auth.js';
 import { APP_CONFIG, type AppConfig } from '@/config/app-config.js';
@@ -62,6 +63,7 @@ export class SessionController {
   // ─── 本人视角 ───────────────────────────────────────────────
 
   /** 退出全部设备：默认包含当前设备（连当前设备时一并清 Cookie） */
+  @Authenticated()
   @ApiMessage('已退出所有设备')
   @Post('auth/sessions/revoke-all')
   @HttpCode(HttpStatus.OK)
@@ -78,6 +80,7 @@ export class SessionController {
   }
 
   /** 我的登录设备 */
+  @Authenticated()
   @Get('auth/sessions')
   listMySessions(
     @CurrentUser() user: AuthenticatedUser,
@@ -88,6 +91,7 @@ export class SessionController {
   }
 
   /** 踢掉我的某台设备（踢的是当前设备时一并清 Cookie） */
+  @Authenticated()
   @ApiMessage('设备已下线')
   @Delete('auth/sessions/:id')
   @HttpCode(HttpStatus.OK)
@@ -106,7 +110,7 @@ export class SessionController {
   // ─── 管理员视角 ─────────────────────────────────────────────
 
   /** 管理员：踢出某用户的全部登录态 */
-  @AdminOnly()
+  @RequirePermission('session:revoke')
   @ApiMessage('已踢出该用户的登录态')
   @Delete('users/sessions/:id')
   @HttpCode(HttpStatus.OK)
@@ -117,7 +121,7 @@ export class SessionController {
   }
 
   /** 管理员：查看某用户的登录设备 */
-  @AdminOnly()
+  @RequirePermission('session:read')
   @Get('users/:id/sessions')
   adminListUserSessions(
     @CurrentUser() operator: AuthenticatedUser,
@@ -129,7 +133,7 @@ export class SessionController {
   }
 
   /** 管理员：踢出某用户的单个会话 */
-  @AdminOnly()
+  @RequirePermission('session:revoke')
   @ApiMessage('设备已下线')
   @Delete('users/:id/sessions/:sessionId')
   @HttpCode(HttpStatus.OK)

@@ -94,6 +94,8 @@ describe('envSchema / 连接池与认证变量', () => {
           'LOG_LEVEL',
           'NODE_ENV',
           'PORT',
+          // RBAC：「角色 → 权限码」缓存有效期（默认 60s）
+          'RBAC_CACHE_TTL_SECONDS',
         ].sort(),
       );
     }

@@ -22,7 +22,9 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "perm:audit": "node scripts/permission-audit.mjs",
+    "perm:sync": "node scripts/sync-permissions.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",

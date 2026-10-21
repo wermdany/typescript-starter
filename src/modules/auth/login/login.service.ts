@@ -139,6 +139,8 @@ export class LoginService {
       return id;
     });
 
+    const roles = await this.accounts.findRoleCodes(account.user.id);
+
     return {
       accessToken: pair.accessToken,
       refreshToken: pair.refreshToken,
@@ -147,7 +149,7 @@ export class LoginService {
         id: account.user.id,
         studentNo: account.user.studentNo,
         nickname: account.user.nickname,
-        role: account.user.role,
+        roles,
       },
     };
   }

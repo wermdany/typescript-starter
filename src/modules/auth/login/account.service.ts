@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 
+import type { RoleCode } from '@/common/auth/auth.contract.js';
 import { DatabaseService } from '@/database/database.service.js';
+import { roles, userRoles } from '@/database/schema/rbac.schema.js';
 import { users } from '@/database/schema/users.schema.js';
 import { authUserColumns, type AuthUser } from './dto/user.dto.js';
 
@@ -16,7 +18,7 @@ export interface AccountSummary {
   id: number;
   studentNo: string;
   nickname: string;
-  role: AuthUser['role'];
+  roles: readonly RoleCode[];
 }
 
 /**
@@ -64,7 +66,30 @@ export class AccountService {
       id: user.id,
       studentNo: user.studentNo,
       nickname: user.nickname,
-      role: user.role,
+      roles: await this.findRoleCodes(id),
     };
+  }
+
+  /**
+   * 取用户的角色码集合（多角色）。
+   *
+   * 排序规则：`level` 降序（高权限在前）→ `code` 升序兜底，保证同一次登录
+   * 返回的 `roles` 顺序稳定，前端不必自己排序。
+   * 只统计未软删的绑定与角色行：角色被下线后，持有者下一次请求即失去该角色。
+   */
+  async findRoleCodes(userId: number): Promise<RoleCode[]> {
+    const rows = await this.database.db
+      .select({ code: roles.code })
+      .from(userRoles)
+      .innerJoin(roles, eq(roles.id, userRoles.roleId))
+      .where(
+        and(
+          eq(userRoles.userId, userId),
+          isNull(userRoles.deletedAt),
+          isNull(roles.deletedAt),
+        ),
+      )
+      .orderBy(desc(roles.level), asc(roles.code));
+    return rows.map((row) => row.code as RoleCode);
   }
 }

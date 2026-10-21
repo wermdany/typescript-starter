@@ -42,6 +42,15 @@ export const envSchema = z.object({
   /** 连接池上限 */
   DB_POOL_MAX: z.coerce.number().int().positive().default(10),
 
+  // ─── RBAC ─────────────────────────────────────────────────
+  /**
+   * 「角色 → 权限码」缓存（Tier-1）的有效期（秒）。
+   *
+   * 只约束角色授权表；用户的角色集合不缓存（每次请求随会话查库），
+   * 因此给用户增删角色是下一次请求即生效，不受该值影响。
+   */
+  RBAC_CACHE_TTL_SECONDS: z.coerce.number().int().positive().default(60),
+
   // 业务配置（登录会话 / 登录安全 / Cookie 策略）不在这里：
   // 见 `app-config.ts`（业务配置独立于环境变量，业务层 `@Inject(APP_CONFIG)` 注入）
 });

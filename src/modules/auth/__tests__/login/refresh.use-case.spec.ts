@@ -16,7 +16,6 @@ const USER = {
   studentNo: '2019010001',
   email: 'a@b.c',
   nickname: '学生',
-  role: 'student' as const,
   points: 0,
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -30,6 +29,8 @@ function setup(session?: {
 }) {
   const accounts = {
     findById: vi.fn(async () => USER as typeof USER | undefined),
+    // 多角色：续期响应里的 roles 由此取
+    findRoleCodes: vi.fn(async () => ['student']),
   };
   const sessions = {
     findByRefreshHash: vi.fn(async () => session as typeof session | undefined),

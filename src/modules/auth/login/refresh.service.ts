@@ -77,6 +77,8 @@ export class RefreshService {
       throw new UnauthorizedException(UNAUTHENTICATED_MESSAGE);
     }
 
+    const roles = await this.accounts.findRoleCodes(session.userId);
+
     return {
       accessToken: pair.accessToken,
       refreshToken: pair.refreshToken,
@@ -85,7 +87,7 @@ export class RefreshService {
         id: user.id,
         studentNo: user.studentNo,
         nickname: user.nickname,
-        role: user.role,
+        roles,
       },
     };
   }

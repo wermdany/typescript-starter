@@ -3,6 +3,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import {
   UNAUTHENTICATED_MESSAGE,
   type AuthenticatedUser,
+  type RoleCode,
 } from '@/common/auth/auth.contract.js';
 import { AccountService } from './account.service.js';
 
@@ -13,7 +14,8 @@ export interface MeResult {
     studentNo: string;
     email: string;
     nickname: string;
-    role: AuthenticatedUser['role'];
+    /** 多角色；顺序按 role.level 降序，前端可直接取首个当"主角色"展示 */
+    roles: readonly RoleCode[];
     points: number;
   };
   /** 本次请求所用会话，前端可用于在设备列表里高亮"本机" */
@@ -42,7 +44,7 @@ export class MeService {
         studentNo: account.studentNo,
         email: account.email,
         nickname: account.nickname,
-        role: account.role,
+        roles: user.roles,
         points: account.points,
       },
       sessionId: user.sessionId,

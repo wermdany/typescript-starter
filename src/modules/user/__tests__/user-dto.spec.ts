@@ -91,20 +91,28 @@ describe('createUserSchema：文本字段规范化（无例外字段，password 
     expect(issues[0]?.message).toContain('>=1');
   });
 
-  it('role 带空白 → 规范化后取值', () => {
+  it('roles 是数组字段 → trimmed() 原样透传，元素带空白即非法（不做元素级 trim）', () => {
     expect(
-      createUserSchema.parse({ ...validCreate, role: ' admin ' }).role,
-    ).toBe('admin');
+      expectFail(createUserSchema, { ...validCreate, roles: [' admin '] })[0]
+        ?.path,
+    ).toBe('roles.0');
   });
 
-  it('role 纯空白（或空串）→ 报非法枚举，不静默回落默认值', () => {
-    for (const input of ['  ', '']) {
-      expect(
-        expectFail(createUserSchema, { ...validCreate, role: input })[0]?.path,
-      ).toBe('role');
-    }
+  it('roles 重复 → 报「角色不能重复」，不静默去重', () => {
+    expect(
+      expectFail(createUserSchema, {
+        ...validCreate,
+        roles: ['student', 'student'],
+      })[0]?.message,
+    ).toContain('角色不能重复');
+  });
+
+  it('roles 省略 → 默认学生；空数组 → 拒绝（不允许零角色用户）', () => {
     // 只有"不传"才走默认值
-    expect(createUserSchema.parse(validCreate).role).toBe('student');
+    expect(createUserSchema.parse(validCreate).roles).toEqual(['student']);
+    expect(
+      expectFail(createUserSchema, { ...validCreate, roles: [] })[0]?.path,
+    ).toBe('roles');
   });
 
   it('null 报类型错误（RFC 7396 的 null 是显式语义，不能当成"没传"）', () => {
@@ -214,11 +222,11 @@ describe('updateUserSchema：严格三态（省略 / 空值 / null）', () => {
   it.each([
     ['空串', { nickname: '' }],
     ['纯空白', { nickname: '   ' }],
-    ['空枚举串', { role: '' }],
+    ['非法角色', { roles: ['root'] }],
   ])('%s → 字段级 400（不再被静默吞掉后落到 refine）', (_label, input) => {
     const issues = expectFail(updateUserSchema, input);
     expect(issues.map((i) => i.path)).toContain(
-      _label === '空枚举串' ? 'role' : 'nickname',
+      _label === '非法角色' ? 'roles.0' : 'nickname',
     );
     expect(issues.map((i) => i.message)).not.toContain('至少提供一个更新字段');
   });

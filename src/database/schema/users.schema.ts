@@ -1,7 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
   pgTable,
-  pgEnum,
   varchar,
   integer,
   index,
@@ -11,12 +10,13 @@ import {
 
 import { timestamps } from './columns.js';
 
-export const userRoleEnum = pgEnum('user_role', [
-  'student',
-  'teacher',
-  'admin',
-]);
-
+/**
+ * 用户表。
+ *
+ * 刻意**没有** `role` 列：角色是独立的 `user_roles` 多对多关系（见 `rbac.schema.ts`）。
+ * 曾经的单值 `role` 枚举列已在 `0006` 迁移里删除 —— 单值列与多角色并存时，
+ * 两份真相必然会漂移（谁在什么时候被改的、以哪边为准），所以一次性收口。
+ */
 export const users = pgTable(
   'users',
   {
@@ -25,7 +25,6 @@ export const users = pgTable(
     email: text().notNull(),
     nickname: varchar('nickname', { length: 50 }).notNull(),
     passwordHash: varchar('password_hash', { length: 255 }).notNull(),
-    role: userRoleEnum('role').notNull().default('student'),
     points: integer('points').notNull().default(0),
     ...timestamps(),
   },

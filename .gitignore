@@ -32,3 +32,6 @@
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+
+# WorkBuddy 项目记忆（本地）
+.workbuddy/

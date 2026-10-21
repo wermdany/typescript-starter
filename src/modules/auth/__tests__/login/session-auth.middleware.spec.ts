@@ -16,7 +16,7 @@ function setup(overrides: Partial<Deps> = {}) {
     id: 1,
     studentNo: '2019010001',
     nickname: '学生',
-    role: 'student',
+    roles: ['student'],
     sessionId: 7,
   };
   const deps = {
@@ -32,13 +32,18 @@ function setup(overrides: Partial<Deps> = {}) {
       ),
       findAuthUserById: vi.fn(
         async (): Promise<
-          | { id: number; studentNo: string; nickname: string; role: 'student' }
+          | {
+              id: number;
+              studentNo: string;
+              nickname: string;
+              roles: string[];
+            }
           | undefined
         > => ({
           id: 1,
           studentNo: '2019010001',
           nickname: '学生',
-          role: 'student',
+          roles: ['student'],
         }),
       ),
       touch: vi.fn(async () => undefined),
@@ -75,7 +80,11 @@ describe('createSessionAuthMiddleware', () => {
     await middleware(req, {} as Response, next);
 
     expect(next).toHaveBeenCalledTimes(1);
-    expect(req.user).toMatchObject({ id: 1, sessionId: 7, role: 'student' });
+    expect(req.user).toMatchObject({
+      id: 1,
+      sessionId: 7,
+      roles: ['student'],
+    });
   });
 
   it('会话未命中 → 不注入，放行交给守卫出 401（中间件不短路）', async () => {

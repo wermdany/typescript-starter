@@ -37,12 +37,13 @@ function setup(user?: { id: number; passwordHash: string }) {
               id: user.id,
               studentNo: '2019010001',
               nickname: '学生',
-              role: 'student' as const,
             },
             passwordHash: user.passwordHash,
           }
         : undefined,
     ),
+    // 多角色：登录响应里的 roles 由此取（默认学生）
+    findRoleCodes: vi.fn(async () => ['student']),
   };
   const sessions = {
     createWithLimit: vi.fn(async () => 7),
@@ -109,7 +110,7 @@ describe('LoginService（防枚举 + 限流 + 会话上限）', () => {
         id: 1,
         studentNo: '2019010001',
         nickname: '学生',
-        role: 'student',
+        roles: ['student'],
       },
     });
     expect(sessions.createWithLimit).toHaveBeenCalledWith(

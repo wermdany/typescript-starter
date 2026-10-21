@@ -16,46 +16,73 @@ import { hashToken } from '@/shared/auth/token.js';
 vi.mock('@/database/database.service.js', () => ({
   DatabaseService: class {
     db = {
-      select: (projection: Record<string, unknown>) => ({
-        from: () => ({
-          // 会话表 join 用户（重放检测路径），只出现在非认证请求里，解析为空集
-          innerJoin: () => ({
-            where: () => ({
-              limit: async () => [],
-              // oxlint-disable-next-line unicorn/no-thenable
-              then: (resolve: (rows: unknown[]) => unknown) =>
-                Promise.resolve([]).then(resolve),
-            }),
-          }),
-          where: () => ({
-            limit: async () =>
-              'lastUsedAt' in projection
-                ? [{ id: 7, userId: 1, lastUsedAt: new Date() }] // 认证中间件：会话命中
-                : 'nickname' in projection
-                  ? [
-                      {
-                        id: 1,
-                        studentNo: '2019010002',
-                        email: 'stu@example.edu.cn',
-                        nickname: '董婷',
-                        role: 'admin',
-                        points: 0,
-                        createdAt: new Date(),
-                        updatedAt: new Date(),
-                      },
-                    ] // 认证中间件：用户命中
-                  : [],
-            // 计数查询（列表 total）走 thenable
+      select: (projection: Record<string, unknown>) => {
+        /**
+         * 按投影列推断是哪条查询（drizzle 链式 API 的最小替身）。
+         *
+         * - 会话命中：投影含 `lastUsedAt`
+         * - 用户命中：投影含 `nickname`
+         * - 角色→权限码（PermissionService.load）：投影同时含 `role` 与 `code`
+         * - 角色列表 / 用户角色集合：投影含 `code`
+         * - 其余（列表、详情、重放检测）：空集 / 计数 0
+         */
+        const rows = (): unknown[] => {
+          if ('lastUsedAt' in projection) {
+            return [{ id: 7, userId: 1, lastUsedAt: new Date() }];
+          }
+          if ('role' in projection && 'code' in projection) {
+            // admin 持通配码：超级管理员，短路所有权限点
+            return [{ role: 'admin', code: '*' }];
+          }
+          if ('code' in projection) return [{ code: 'admin' }];
+          if ('nickname' in projection) {
+            return [
+              {
+                id: 1,
+                studentNo: '2019010002',
+                email: 'stu@example.edu.cn',
+                nickname: '董婷',
+                role: 'admin',
+                points: 0,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              },
+            ];
+          }
+          return [];
+        };
+
+        // 允许任意次数的 join 链（`role_permissions ⋈ roles ⋈ permissions` 有两次）
+        const chain: Record<string, unknown> = {};
+        chain.innerJoin = () => chain;
+        chain.where = () => chain;
+        // `orderBy` 既要能被 await（角色查询），也要支持 `.limit().offset()`（分页列表）
+        const ordered: Record<string, unknown> = {
+          limit: () => ({ offset: async () => [] }),
+          // oxlint-disable-next-line unicorn/no-thenable
+          then: (resolve: (value: unknown[]) => unknown) =>
+            Promise.resolve(rows()).then(resolve),
+        };
+        chain.orderBy = () => ordered;
+        chain.limit = async () => rows();
+        // oxlint-disable-next-line unicorn/no-thenable
+        chain.then = (resolve: (value: unknown[]) => unknown) =>
+          Promise.resolve(rows()).then(resolve);
+
+        return {
+          from: () => ({
+            ...chain,
+            // 计数查询（列表 total）走 thenable，与真实 paginate 的用法对齐
             // oxlint-disable-next-line unicorn/no-thenable
-            then: (resolve: (rows: unknown[]) => unknown) =>
+            then: (resolve: (value: unknown[]) => unknown) =>
               Promise.resolve([{ value: 0 }]).then(resolve),
             orderBy: () => ({ limit: () => ({ offset: async () => [] }) }),
+            limit: async () => rows(),
           }),
-          limit: async () => [],
-        }),
-      }),
+        };
+      },
       insert: () => ({
-        values: () => ({ returning: async () => [] }),
+        values: () => ({ returning: async () => [], onConflictDoNothing: () => ({}) }),
       }),
       update: () => ({
         set: () => ({ where: () => ({ returning: async () => [] }) }),

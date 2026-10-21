@@ -14,6 +14,7 @@ import {
 
 import { DatabaseService, type Db } from '@/database/database.service.js';
 import { users } from '@/database/schema/users.schema.js';
+import { roles, userRoles } from '@/database/schema/rbac.schema.js';
 import {
   authSessions,
   type NewAuthSessions,
@@ -284,10 +285,13 @@ export class SessionService {
   }
 
   /**
-   * 认证中间件用的最小身份查询（只取会话注入 `req.user` 需要的四列）。
+   * 认证中间件用的最小身份查询（会话注入 `req.user` 需要的字段）。
    *
    * 与登录子域的 `AccountService.findById` 字段需求不同（不需要 email / points），
    * 且中间件属于会话子域 —— 自带这份查询可以不依赖 LoginModule。
+   *
+   * 多角色：角色码另外一次查询（不缓存用户→角色，保证"改角色下一次请求即生效"）。
+   * 两次查询都按主键/索引走，代价远小于为每个用户维护一份权限缓存。
    */
   async findAuthUserById(userId: number) {
     const [row] = await this.db
@@ -295,12 +299,26 @@ export class SessionService {
         id: users.id,
         studentNo: users.studentNo,
         nickname: users.nickname,
-        role: users.role,
       })
       .from(users)
       .where(and(eq(users.id, userId), isNull(users.deletedAt)))
       .limit(1);
-    return row;
+    if (!row) return undefined;
+
+    const roleRows = await this.db
+      .select({ code: roles.code })
+      .from(userRoles)
+      .innerJoin(roles, eq(roles.id, userRoles.roleId))
+      .where(
+        and(
+          eq(userRoles.userId, userId),
+          isNull(userRoles.deletedAt),
+          isNull(roles.deletedAt),
+        ),
+      )
+      .orderBy(desc(roles.level), roles.code);
+
+    return { ...row, roles: roleRows.map((role) => role.code) };
   }
 
   /** 统计某用户当前存活（未吊销）的会话数 */

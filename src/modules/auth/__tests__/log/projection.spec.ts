@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import { sessionPublicColumns } from '@/modules/auth/session/dto/session.dto.js';
 import { loginLogPublicColumns } from '@/modules/auth/log/dto/login-log.dto.js';
-import { userSummaryColumns } from '@/modules/auth/login/dto/user.dto.js';
 import { authUserColumns } from '@/modules/auth/login/dto/user.dto.js';
 
 /**
@@ -56,18 +55,12 @@ describe('loginLogPublicColumns（登录记录对外白名单）', () => {
   });
 });
 
-describe('userSummaryColumns（登录响应里的用户摘要）', () => {
-  it('只含身份四字段，不含密码哈希等敏感列', () => {
-    expect(Object.keys(userSummaryColumns).sort()).toEqual([
-      'id',
-      'nickname',
-      'role',
-      'studentNo',
-    ]);
-    expect(userSummaryColumns).not.toHaveProperty('passwordHash');
-  });
-});
-
+/**
+ * 登录响应的用户摘要（`UserSummary`）自多角色改造起是**纯 TS 类型**：
+ * 角色来自 `user_roles` 关联表（`AccountService.findRoleCodes`），不是 `users` 的列，
+ * 因此没有对应的 `select` 列白名单可断言 —— 这里改为冻结「认证投影不再含 role」，
+ * 防止有人把单角色列又加回来（那会让多角色重新退化成单角色）。
+ */
 describe('authUserColumns（认证用例的用户投影）', () => {
   it('含完整资料但不含密码哈希与软删标记', () => {
     expect(Object.keys(authUserColumns).sort()).toEqual([
@@ -76,11 +69,15 @@ describe('authUserColumns（认证用例的用户投影）', () => {
       'id',
       'nickname',
       'points',
-      'role',
       'studentNo',
       'updatedAt',
     ]);
     expect(authUserColumns).not.toHaveProperty('passwordHash');
     expect(authUserColumns).not.toHaveProperty('deletedAt');
+  });
+
+  it('角色不来自 users 列：投影里不得出现 role', () => {
+    // 多角色的唯一真相是 user_roles；这里出现 role 说明又回到了单角色模型
+    expect(authUserColumns).not.toHaveProperty('role');
   });
 });

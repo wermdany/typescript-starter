@@ -3,8 +3,9 @@ import { Controller, Get, Param, Query } from '@nestjs/common';
 import { type PageResponse } from '@/shared/common.js';
 import { ZodValidationPipe } from '@/shared/http/zod-validation.pipe.js';
 import {
-  AdminOnly,
+  Authenticated,
   CurrentUser,
+  RequirePermission,
   type AuthenticatedUser,
 } from '@/shared/auth.js';
 import {
@@ -28,6 +29,7 @@ export class LoginLogController {
   constructor(private readonly loginLogs: LoginLogService) {}
 
   /** 我的登录记录 */
+  @Authenticated()
   @Get('auth/login-logs')
   listMyLoginLogs(
     @CurrentUser() user: AuthenticatedUser,
@@ -37,7 +39,7 @@ export class LoginLogController {
   }
 
   /** 管理员：某用户的登录记录 */
-  @AdminOnly()
+  @RequirePermission('login-log:read')
   @Get('users/:id/login-logs')
   adminListUserLoginLogs(
     @Param('id', new ZodValidationPipe(userIdParamSchema)) userId: UserIdParam,

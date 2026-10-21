@@ -10,15 +10,41 @@
  */
 export {
   ADMIN_ONLY_KEY,
+  AUTHENTICATED_KEY,
   AdminOnly,
+  Authenticated,
   PUBLIC_KEY,
   Public,
 } from '@/shared/auth/decorators/auth.decorator.js';
+export {
+  OWNER_KEY,
+  PERMISSION_KEY,
+  OwnerOrPermission,
+  RequirePermission,
+  type OwnerRequirement,
+} from '@/shared/auth/decorators/rbac.decorator.js';
 export { CurrentUser } from '@/shared/auth/decorators/current-user.decorator.js';
+export {
+  OWNERSHIP_DENIED_MESSAGE,
+  assertOwnership,
+} from '@/shared/auth/ownership.js';
+export {
+  SYSTEM_ACTOR_ID,
+  actorIdOf,
+  isSystemActor,
+  ownsResource,
+  systemActor,
+  type Actor,
+  type SystemActor,
+} from '@/common/auth/ownership.contract.js';
 export {
   AuthGuard,
   HttpAuthGuard,
+  HttpPermissionGuard,
+  PermissionGuard,
   type AuthRequirement,
+  type PermissionContext,
+  type PermissionRequirement,
 } from '@/shared/auth/auth.guard.js';
 export { ADMIN_ROLE, isAdmin } from '@/common/auth/auth.contract.js';
 export {
@@ -38,8 +64,20 @@ export {
 export {
   BAD_CREDENTIALS_MESSAGE,
   FORBIDDEN_MESSAGE,
+  ROLE_CODES,
   TOO_MANY_ATTEMPTS_MESSAGE,
   UNAUTHENTICATED_MESSAGE,
+  hasAnyRole,
+  hasRole,
   type AuthenticatedUser,
+  type RoleCode,
   type UserRole,
 } from '@/common/auth/auth.contract.js';
+export {
+  PERMISSION_CHECKER,
+  PERMISSION_DENIED_MESSAGE,
+  WILDCARD_PERMISSION,
+  type PermissionChecker,
+  type PermissionCode,
+  type PermissionSubject,
+} from '@/common/auth/permission.contract.js';

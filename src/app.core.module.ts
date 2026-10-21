@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { AuthGuardModule } from '@/shared/auth/auth.module.js';
 import { HttpContractModule } from '@/shared/http/http.module.js';
 import { LoggerModule } from '@/logger/logger.module.js';
+import { RbacModule } from '@/modules/rbac/rbac.module.js';
 
 /**
  * 应用核心装配（**找"全局有哪些守卫/拦截器/过滤器/中间件"来这里对账**）。
@@ -14,11 +15,12 @@ import { LoggerModule } from '@/logger/logger.module.js';
  * | 能力 | 注册处 |
  * | --- | --- |
  * | 登录态/管理员守卫 | `shared/auth/auth.module.ts`（APP_GUARD） |
+ * | 业务权限点守卫（RBAC） | `modules/rbac/rbac.module.ts`（APP_GUARD）；删掉本行 import 即回滚 |
  * | 成功/失败响应契约 | `shared/http/http.module.ts`（APP_FILTER + APP_INTERCEPTOR） |
  * | body 日志拦截器 | `logger/logger.module.ts`（APP_INTERCEPTOR） |
  * | 请求中间件（trace/access/cookie/认证） | `server.ts` 的 `createApp()`（顺序敏感，见其注释） |
  */
 @Module({
-  imports: [AuthGuardModule, HttpContractModule, LoggerModule],
+  imports: [AuthGuardModule, RbacModule, HttpContractModule, LoggerModule],
 })
 export class AppCoreModule {}

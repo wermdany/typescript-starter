@@ -19,7 +19,7 @@ import type { Request, Response } from 'express';
 import { ApiMessage, type PageResponse } from '@/shared/common.js';
 import { ZodValidationPipe } from '@/shared/http/zod-validation.pipe.js';
 import {
-  AdminOnly,
+  Authenticated,
   CurrentUser,
   Public,
   type AuthenticatedUser,
@@ -134,6 +134,7 @@ export class AuthController {
   }
 
   /** 退出当前设备（幂等）；同时清掉 refreshToken Cookie */
+  @Authenticated()
   @ApiMessage('已退出登录')
   @Post('auth/logout')
   @HttpCode(HttpStatus.OK)
@@ -146,6 +147,7 @@ export class AuthController {
   }
 
   /** 当前身份（前端刷新页面后据此重建本地登录态） */
+  @Authenticated()
   @Get('auth/me')
   currentUser(@CurrentUser() user: AuthenticatedUser): Promise<MeResult> {
     return this.me.execute(user);

@@ -14,9 +14,11 @@ import {
 import { ApiMessage, type PageResponse } from '@/shared/common.js';
 import { ZodValidationPipe } from '@/shared/http/zod-validation.pipe.js';
 import {
-  AdminOnly,
+  Authenticated,
   CurrentUser,
+  OwnerOrPermission,
   Public,
+  RequirePermission,
   type AuthenticatedUser,
 } from '@/shared/auth.js';
 import {
@@ -38,8 +40,10 @@ import { UserService } from './user.service.js';
 /**
  * 用户管理接口。
  *
- * 访问控制：除健康检查外全部要求登录，写操作与管理类查询限管理员（`@AdminOnly()`）；
- * 修改用户允许本人（只能改昵称 / 邮箱，不能改角色）。
+ * 访问控制（RBAC）：权限码 `资源:动作` 由 `@RequirePermission` 声明，
+ * 自助类路由用 `@Authenticated()`（登录即可，语义靠归属判定）；
+ * `PATCH /users/:id` 用 `@OwnerOrPermission('id', 'user:update')`：
+ * 本人改自己无需权限码，管理员改别人需要 `user:update`。
  *
  * 静态段路由（health、me、by-student-no）必须声明在 `:id` 路由之前。
  */
@@ -54,14 +58,15 @@ export class UserController {
     return { status: 'ok' };
   }
 
-  /** 当前用户资料（任意登录用户） */
+  /** 当前用户资料（登录即可） */
+  @Authenticated()
   @Get('me')
   findMe(@CurrentUser() user: AuthenticatedUser): Promise<UserResponse> {
     return this.userService.findMe(user.id);
   }
 
   /** 创建用户 */
-  @AdminOnly()
+  @RequirePermission('user:create')
   @ApiMessage('创建成功')
   @Post()
   create(
@@ -70,8 +75,8 @@ export class UserController {
     return this.userService.create(dto);
   }
 
-  /** 分页查询用户列表（管理员） */
-  @AdminOnly()
+  /** 分页查询用户列表（管理视角） */
+  @RequirePermission('user:read')
   @Get()
   findAll(
     @Query(new ZodValidationPipe(queryUsersSchema)) query: QueryUsersDto,
@@ -79,8 +84,8 @@ export class UserController {
     return this.userService.findAll(query);
   }
 
-  /** 按学号查询用户详情（管理员） */
-  @AdminOnly()
+  /** 按学号查询用户详情（管理视角） */
+  @RequirePermission('user:read')
   @Get('by-student-no/:studentNo')
   findByStudentNo(
     @Param('studentNo', new ZodValidationPipe(studentNoParamSchema))
@@ -89,7 +94,8 @@ export class UserController {
     return this.userService.findByStudentNo(studentNo);
   }
 
-  /** 按 ID 查询用户详情 */
+  /** 按 ID 查询用户详情（管理视角：任意登录用户不可窥探他人资料） */
+  @RequirePermission('user:read')
   @Get(':id')
   findOne(
     @Param('id', new ZodValidationPipe(idParamSchema)) id: IdParam,
@@ -100,9 +106,10 @@ export class UserController {
   /**
    * 更新用户资料。
    *
-   * - 管理员：可改任意用户的邮箱 / 昵称 / 角色 / 积分
-   * - 本人：只能改自己的昵称 / 邮箱（改角色 → 403）
+   * - 本人：无需权限码（路由级归属判定放行），但字段仍受 `update-policy` 白名单约束
+   * - 他人：需要 `user:update`（管理员），可改任意字段
    */
+  @OwnerOrPermission('id', 'user:update')
   @Patch(':id')
   update(
     @CurrentUser() user: AuthenticatedUser,
@@ -113,6 +120,7 @@ export class UserController {
   }
 
   /** 修改本人的密码：凭旧密码即可，改完踢掉其它设备的登录态 */
+  @Authenticated()
   @ApiMessage('密码已修改')
   @Patch('password')
   changeMyPassword(
@@ -123,7 +131,7 @@ export class UserController {
   }
 
   /** 管理员重置指定用户的密码（无需旧密码），并踢掉其全部登录态 */
-  @AdminOnly()
+  @RequirePermission('user:reset-password')
   @ApiMessage('密码已重置，该用户的登录态已全部失效')
   @Patch('password/:id')
   changePassword(
@@ -135,23 +143,25 @@ export class UserController {
   }
 
   /** 恢复软删除用户 */
-  @AdminOnly()
+  @RequirePermission('user:restore')
   @ApiMessage('恢复成功')
   @Post('restore/:id')
   restore(
+    @CurrentUser() user: AuthenticatedUser,
     @Param('id', new ZodValidationPipe(idParamSchema)) id: IdParam,
   ): Promise<UserResponse> {
-    return this.userService.restore(id);
+    return this.userService.restore(user, id);
   }
 
   /** 软删除用户 */
-  @AdminOnly()
+  @RequirePermission('user:delete')
   @ApiMessage('删除成功')
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   softDelete(
+    @CurrentUser() user: AuthenticatedUser,
     @Param('id', new ZodValidationPipe(idParamSchema)) id: IdParam,
   ): Promise<UserResponse> {
-    return this.userService.softDelete(id);
+    return this.userService.softDelete(user, id);
   }
 }

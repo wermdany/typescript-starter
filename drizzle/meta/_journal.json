@@ -22,6 +22,34 @@
       "when": 1792486034234,
       "tag": "0002_auth_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792585184509,
+      "tag": "0003_rbac",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792585200149,
+      "tag": "0004_rbac_seed",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792586938627,
+      "tag": "0005_rbac_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792589830782,
+      "tag": "0006_drop_users_role",
+      "breakpoints": true
     }
   ]
 }

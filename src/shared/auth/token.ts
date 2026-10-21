@@ -10,7 +10,7 @@ import { createHash, randomBytes } from 'node:crypto';
 
 /** 生成新的 token：32 字节随机数 → base64url（43 字符，无填充） */
 export function generateToken(): string {
-  return randomBytes(32).toString('base64url');
+  return randomBytes(128).toString('base64url');
 }
 
 /** token → 入库用的 sha256 十六进制摘要 */

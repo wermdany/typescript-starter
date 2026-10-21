@@ -32,7 +32,7 @@ const STUDENT: AuthenticatedUser = {
   id: 1,
   studentNo: '2019010001',
   nickname: '学生',
-  role: 'student',
+  roles: ['student'],
   sessionId: 7,
 };
 
