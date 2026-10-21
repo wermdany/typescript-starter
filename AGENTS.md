@@ -19,8 +19,9 @@ curl -s 'http://localhost:8000/users?pageSize=1'
 
 - 新增路由返回 404 说明 watch 尚未重编译完，等 1~2 秒再试，而不是重启服务
 - 服务器确实挂了（端口无监听、连接被拒）时，先向用户确认，不要擅自重启
-- `nest-cli.json` 的 `deleteOutDir: true` 会让 `nest start` 先删整个 `dist/`，
-  在本机会触发 safe-delete 保护并卡住，还可能留下多个进程抢占端口
+- `nest-cli.json` 的 `deleteOutDir` **已于 2026-10-21 改为 `false`**：原本的 `true` 会让
+  `nest start` 先删整个 `dist/`，在本机触发 safe-delete 保护而卡住，还可能留下多个进程抢占端口。
+  代价是 `dist/` 会残留过期产物 —— 需要干净重建时手动删除该目录（会触发同样的 safe-delete 确认）
 
 ---
 
@@ -569,8 +570,10 @@ const result = await paginate(
 
 1. `pnpm lint`
 2. `pnpm build`（看退出码；tsc 默认即使报错也会 emit）
-3. `pnpm test`（**单轮对话完成的需求跳过此步**，见第 3 节；仅当用户明确要求时执行）
-4. 在已运行的服务器上端到端验证（第 0 节）：
+3. `pnpm perm:audit`（**动了 controller 的路由标注或权限码时必须跑**，退出码必须为 0；
+   只改内部实现可跳过）
+4. `pnpm test`（**单轮对话完成的需求跳过此步**，见第 3 节；仅当用户明确要求时执行）
+5. 在已运行的服务器上端到端验证（第 0 节）：
    - `lsof -nP -iTCP:8000 -sTCP:LISTEN` 确认服务在跑，等 1~3 秒再 curl
    - 覆盖成功路径 + 400（带 `errors`）+ 404 + 409（唯一冲突）+ 401（旧密码错误，仅改密接口）
    - 例：`curl -s -X POST http://localhost:8000/users -H 'Content-Type: application/json' -d '{...}'`；
@@ -587,16 +590,17 @@ const result = await paginate(
      （warn），5xx 恰好两行（过滤器 error + access error，traceId 相同）
    - **启动日志**：`grep '服务已就绪\|可访问地址\|启动耗时' logs/app.log`
    - `LOG_BODY` 相关改动对比开关前后：关闭时无 `body:` 行，开启时有且敏感字段为 `***`
-5. 清理验证产生的测试数据（软删也算留痕），不要把脏数据留在库里
+6. 清理验证产生的测试数据（软删也算留痕），不要把脏数据留在库里
 
 ---
 
 ## 13. 已知坑
 
-- **启动开发服务器会触发 safe-delete 保护**（`deleteOutDir: true`）→ 见第 0 节
-- **`nest build` / `pnpm build` 会杀掉 watch 进程**：`deleteOutDir: true` 先删 `dist/`，
-  正在 watch 的进程丢失编译产物直接退出且不再重试 —— 改代码前确认没有正在跑的
+- **`nest build` / `pnpm build` 会杀掉 watch 进程**：根因是 `deleteOutDir`（见第 0 节，现已改为 `false`，
+  此坑大幅缓解但仍可能残留 ⇒ 构建产物不一定是当次代码的完整镜像）——改代码前仍建议确认没有正在跑的
   `start:dev`，或改用 `tsc --noEmit` 做类型检查
+- **已不再是坑（2026-10-21 起）**：`deleteOutDir: true` 触发的 safe-delete 卡死与端口抢占，已通过将
+  `nest-cli.json` 改为 `false` 解决
 - **drizzle 包装 pg 错误**：判断 `23505` 必须先读 `err.cause`
 - **`timestamps()` 是函数**：写成共享对象常量会导致多表列名错乱
 - **`updatedAt` 不自动更新**：所有 update 手动 set
@@ -701,8 +705,11 @@ export type NewXxx = typeof xxx.$inferInsert;
    - 列级唯一用 `.unique()`（如 `student_no`），只有"软删后允许复用"才用部分唯一索引
 6. **外键**用 `references(() => users.id, { onDelete })`：
    归属类数据（会话、子资源）`'cascade'`；审计类数据（登录日志）`'set null'`，用户删除后仍保留。
-7. **枚举**用 `pgEnum('<名>', ['a', 'b'])`，列上显式传列名（`role: userRoleEnum('role')`）；
+7. **枚举**用 `pgEnum('<名>', ['a', 'b'])`，列上显式传列名；
    新增枚举值需要迁移（`ALTER TYPE ... ADD VALUE`）。
+   ⚠️ 本项目的角色**不是**枚举列：多角色走 `user_roles` 关联表，`users.role` 与
+   `user_role` 枚举已在 `0006` 迁移里删除。需要固定取值集合时优先考虑
+   `varchar` + 应用层校验（`ROLE_CODES`），这样加值不需要迁移。
 8. 每张表在 `schema/index.ts` 导出；对外字段由 `<domain>.projection.ts` 的列白名单界定，
    **token 哈希、密码哈希永不进白名单**。
 9. 改完：`pnpm build` → `pnpm db:generate` → 人工检查迁移 SQL → `pnpm db:migrate`。
@@ -717,3 +724,139 @@ createdAt: timestamp('created_at').notNull().defaultNow(),
 // ❌ 索引写成对象或省略命名
 }, { indexes: [index().on(...)] });
 ```
+
+---
+
+## 16. RBAC 权限声明
+
+**每条路由必须显式声明访问意图，禁止裸奔。** 不写任何标记的路由在运行时会被登录检查兜住（fail-closed），
+但"忘了写"和"本就只要登录"在源码上无法区分 —— 这正是最高危的问题：新增接口漏掉权限而无人发现。
+判定脚本 `pnpm perm:audit` 就是为此存在的，它只认下面四类标记。
+
+| 标记 | 语义 | 典型用途 |
+| --- | --- | --- |
+| `@Public()` | 免登录 | 登录、刷新 token、健康检查 |
+| `@Authenticated()` | 登录即可，无权限点要求 | 本人的资料 / 会话 / 登录记录 |
+| `@RequirePermission('user:create', …)` | 必须具备**全部**权限码（AND） | 管理视角的接口 |
+| `@OwnerOrPermission('id', 'user:update')` | 本人放行，否则要求权限码；`codes` 为空即**纯本人**限定 | 同一接口既服务本人又服务管理员 |
+
+方法级覆盖类级（与 `Reflector.getAllAndOverride` 语义一致），判定脚本按同一规则算。
+
+**权限码格式 `资源:动作`**：
+
+- 资源段与 `@Controller` 前缀一致（`user` / `session` / `login-log`）
+- 动作词表固定：`create` `read` `update` `delete` `restore` `reset-password` `revoke`；
+  新动作先加进词表，不新造同义词
+- 长度 ≤ 64；`*` 是保留码（超级管理员通配，`admin` 角色长期持有），**业务代码里不要写 `*`**
+
+**新增权限码的三步准入，缺一不可**：① 出现在某个装饰器里；② `pnpm perm:audit` 能扫到；
+③ `pnpm perm:sync` 写进 `permissions` 表并授权给目标角色（只做①②等于写了一个永远不放行的码）。
+
+改完路由标注**必须**跑 `pnpm perm:audit`，它有非零退出码，红了不许合并。迁移期允许 `@AdminOnly()`
+以"遗留"形式存在（报告里会单独标出），但**新代码不要再用** `@AdminOnly()`。
+
+角色判定只能走三个原语（`src/common/auth/auth.contract.ts`）：
+
+```ts
+hasRole(user, 'teacher');
+hasAnyRole(user, ['teacher', 'admin']);
+isAdmin(user);                     // === hasRole(user, ADMIN_ROLE)
+```
+
+```ts
+// ❌ 全部禁止：散落写法，多角色后必然出偏差
+user.roles[0] === 'admin'
+user.roles.includes('admin')
+user.roles.length === 1 && user.roles[0] === 'admin'
+// ✅
+isAdmin(user)
+```
+
+- `roles` 是 `readonly RoleCode[]`（多角色，权限取**并集**）；**允许空数组**，空 = 零权限 = 非管理员
+- 用户→角色集合**不缓存**（改角色下一个请求即生效）；角色→权限码走一级缓存
+  `Map<roleCode, Set<permissionCode>>`，TTL 由 `RBAC_CACHE_TTL_SECONDS`（默认 60）控制、single-flight 刷新
+- 🚨 `users.role` 单值列已删除，多角色走 `user_roles` 关联表。第 15.2 节第 7 条讲的 `pgEnum` 写法
+  对其他枚举仍然适用，但**角色不是枚举**：`roles.code` 是 `varchar(32)`，运行时可增删角色
+
+---
+
+## 17. Ownership（本人资源）
+
+"本人能改自己的部分信息、但不能改别人的、也不能改自己的某些字段"由**两道防线**表达，缺一不可：
+
+| 防线 | 位置 | 管什么 |
+| --- | --- | --- |
+| 路由级 | 控制器 `@OwnerOrPermission('id', 'user:update')` | 拿 URL 的 `:id` 与 `actor.id` 比较；非本人则要求权限码 |
+| 服务级 | service 内 `assertOwnership(actor, ownerId)` | 防内部调用 —— 同进程直调不经过守卫（见第 18 节） |
+
+**为什么两道**：装饰器只能回答"这个人能不能进这个路由"，管不到 service 内部被二次引用；
+service 断言又看不到 HTTP 参数。`ownerParam` 当前**只能指向用户 ID**（其他资源的归属走 service 断言，
+不做路由级归属判定）。字段差异不在这里管，走 `update-policy.ts` 的白名单（第 14 节第 3 条同一取向）。
+
+写方法首参约定：
+
+```ts
+softDelete(actor: Actor, id: number)   // ✅ 有身份才能判权
+softDelete(id: number)                 // ❌ 只传资源 id，内部调用时无法判权
+```
+
+可信内部调用用 `systemActor('来源用途')` 构造身份：
+
+```ts
+const actor = systemActor('drizzle:0005');   // ✅ via 必填，留痕
+await service.softDelete(actor, userId);     // ✅
+
+await service.softDelete(userId);            // ❌ 跳过归属判定
+{ ...user, id: actorId } as AuthenticatedUser // ❌ 伪造身份 + 类型断言，两样都禁
+```
+
+- `SYSTEM_ACTOR_ID = 0` 是保留 id，**真实用户 id 从 1 开始**
+- `SystemActor.roles` 恒为空：它**不伪装成任何角色**（`hasRole(sysActor, 'admin') === false`），
+  但 `ownsResource(sysActor, *) === true`。这个不对称是刻意的 —— 别当 bug 改掉
+- `Actor = AuthenticatedUser | SystemActor` 是联合类型：需要真身份的位置（如 `@CurrentUser()` 的参数）
+  必须先用 `isSystemActor()` 收窄，**禁止 `as`**
+
+---
+
+## 18. 内部服务调用防越权
+
+同一进程内 A service 直接 import 并调用 B service 时**不经过任何守卫**：路由级 RBAC 与
+`@OwnerOrPermission` 全部失效。这是本项目最容易被忽略的越权面 —— 传错一个 id 就能操作别人的数据。
+
+| 编号 | 约定 |
+| --- | --- |
+| **R1** | 面向具体用户资源的**写**方法，第一个参数必须是 `actor: Actor`，不得只接收资源 id |
+| **R2** | 这类方法体首部必须有一条断言：`assertOwnership(actor, targetId)`，或显式注明"管理视角，调用方负责 RBAC" |
+| **R3** | 「同一事务内的附属写」可豁免 actor（如 `revokeAllForUser(userId, reason, { executor })`），豁免必须在下面登记，且这类方法**不得出现在 controller 里** |
+| **R4** | 可信内部调用（迁移 / 种子 / 定时任务）用 `systemActor('来源')`，只允许出现在 `scripts/`、`drizzle/`、定时任务目录 |
+| **R5** | HTTP 请求上下文内**禁止**出现 `SystemActor`（出现即说明有人绕过了鉴权） |
+
+当前豁免清单（新增需在此登记）：`SessionService.revokeAllForUser()`。
+
+⚠️ **已知弱点，请如实看待**：本项目**不做 `svc:audit` 自动化脚本**（已决策）。除 R1 能被 TypeScript
+编译期兜住之外，**R2 / R4 / R5 以及"禁止用 `isAdmin(actor)` 做业务分支"都没有机器化检查**：
+传错目标 id、或在 controller 里构造 `SystemActor`，CI 与编译都不会报错。因此：
+
+- PR 描述里加一条自检：本次是否新增/修改了面向用户资源的写方法？首参是否 `actor`？内部调用是否走了 `systemActor`？
+- review 时对新增的 service 写方法逐个看首参与断言
+- **不要把"没报错"当成"没问题"**
+
+---
+
+## 19. `scripts/` 目录约定
+
+脚本是运维与 CI 的一等公民，但**不引入新依赖、缺数据库也能跑**是底线。
+
+- **零新增第三方依赖**：只用 devDependencies 的 `typescript`（AST 解析）与 dependencies 的
+  `pg` + `dotenv`；真要新包，先问用户（第 3 节）
+- 文件名 kebab-case + `.mjs`（Node ESM 直接跑，无编译步骤）；辅助模块放 `scripts/lib/`
+- **单一职责 + 可独立运行**：`pnpm <script>` 一条命令跑完，不依赖测试框架、不绑 `pnpm test`
+- **必须支持 `--json`**（供 CI 解析）与**有意义的退出码**：`0` 成功 / `1` 校验失败（发现了问题）/
+  `2` 环境或参数错误（脚本自身跑不起来）
+- **判定逻辑只写一处**：`scripts/lib/markers.mjs` 的 `analyzeRouteMarkers()` 是单一出口，
+  `perm:audit` / `perm:sync` / `perm:matrix` 复用它，禁止各写一套 —— 否则会出现
+  "脚本说通过、线上是另一回事"的假安全感
+- **纯只读路径必须能在无数据库环境跑通**（如 `perm:audit` 纯 AST、`perm:sync --dry-run`），供 CI 使用；
+  需要连库的脚本从 `.env` 读 `DATABASE_URL`，不要把连接串写进脚本
+- 脚本生成的文档（如 `docs/rbac-matrix.md`）一律**不要手改**，用 `--check` 与 git 版本比对做漂移校验
+- 已知识别边界写在脚本头注释，并与 `docs/rbac-plan.md` §5.5 对齐（**那里是唯一权威来源**，新增边界先改文档再改注释）
