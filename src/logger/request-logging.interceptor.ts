@@ -1,15 +1,16 @@
 import {
   CallHandler,
+  Inject,
   ExecutionContext,
   Injectable,
   Logger,
   NestInterceptor,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { ENV } from '@/config/config.module.js';
+import type { Env } from '@/config/env.js';
 import { Observable } from 'rxjs';
 import type { Request } from 'express';
 
-import type { Env } from '@/config/env.js';
 import { formatLogBody, hasMeaningfulBody } from './sanitize.js';
 
 /**
@@ -25,17 +26,14 @@ import { formatLogBody, hasMeaningfulBody } from './sanitize.js';
 export class RequestLoggingInterceptor implements NestInterceptor {
   private readonly logger = new Logger('HTTP');
 
-  constructor(private readonly config: ConfigService<Env, true>) {}
+  constructor(@Inject(ENV) private readonly env: Env) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     if (context.getType() !== 'http') return next.handle();
 
     const req = context.switchToHttp().getRequest<Request>();
 
-    if (
-      this.config.get('LOG_BODY', { infer: true }) &&
-      hasMeaningfulBody(req.body)
-    ) {
+    if (this.env.LOG_BODY && hasMeaningfulBody(req.body)) {
       this.logger.log(
         `${req.method} ${req.originalUrl} body: ${formatLogBody(req.body)}`,
       );

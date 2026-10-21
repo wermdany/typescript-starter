@@ -32,24 +32,26 @@ describe('envSchema / LOG_BODY', () => {
     if (result.success) expect(result.data.LOG_BODY).toBe(false);
   });
 
-  it.each(['true', '1', 'yes', 'on', 'TRUE'])('真值词表 %s → true', (raw) => {
+  it.each(['true', 'TRUE', 'True'])('严格布尔 %s → true', (raw) => {
     const result = parse({ LOG_BODY: raw });
 
     expect(result.success).toBe(true);
     if (result.success) expect(result.data.LOG_BODY).toBe(true);
   });
 
-  it.each(['false', '0', 'no', 'off', 'Off'])('假值词表 %s → false', (raw) => {
+  it.each(['false', 'FALSE', 'False'])('严格布尔 %s → false', (raw) => {
     const result = parse({ LOG_BODY: raw });
 
     expect(result.success).toBe(true);
     if (result.success) expect(result.data.LOG_BODY).toBe(false);
   });
 
-  it('非法值 fail-fast', () => {
-    expect(parse({ LOG_BODY: '2' }).success).toBe(false);
-    expect(parse({ LOG_BODY: 'yep' }).success).toBe(false);
-  });
+  it.each(['1', 'yes', 'on', '0', 'no', 'off', '2', 'yep'])(
+    '宽松词值 %s 一律 fail-fast（不再接受非 true/false 的写法）',
+    (raw) => {
+      expect(parse({ LOG_BODY: raw }).success).toBe(false);
+    },
+  );
 });
 
 describe('envSchema / LOG_FILE', () => {
@@ -78,40 +80,22 @@ describe('envSchema / 连接池与认证变量', () => {
     expect(parse({ DB_POOL_MAX: '1.5' }).success).toBe(false);
   });
 
-  it('认证变量未设置时给出可用默认值（access 2h / refresh 7d / 滑动续期）', () => {
+  it('schema 只含底层配置键，业务配置（AUTH_* 等）不再从这里注入', () => {
     const result = parse();
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data).toMatchObject({
-        AUTH_ACCESS_TTL_MINUTES: 120,
-        AUTH_REFRESH_TTL_DAYS: 7,
-        AUTH_REFRESH_SLIDING: true,
-        AUTH_REFRESH_WINDOW_MINUTES: 5,
-        AUTH_MAX_SESSIONS_PER_USER: 20,
-        AUTH_LOGIN_MAX_ATTEMPTS: 10,
-        AUTH_LOGIN_WINDOW_MINUTES: 15,
-        AUTH_TRUST_PROXY: false,
-      });
+      expect(Object.keys(result.data).sort()).toEqual(
+        [
+          'DATABASE_URL',
+          'DB_POOL_MAX',
+          'LOG_BODY',
+          'LOG_FILE',
+          'LOG_LEVEL',
+          'NODE_ENV',
+          'PORT',
+        ].sort(),
+      );
     }
-  });
-
-  it('有效期必须为正整数', () => {
-    expect(parse({ AUTH_ACCESS_TTL_MINUTES: '0' }).success).toBe(false);
-    expect(parse({ AUTH_REFRESH_TTL_DAYS: '-7' }).success).toBe(false);
-  });
-
-  it('认证布尔变量同样走布尔词表（不接受随意字符串）', () => {
-    const result = parse({
-      AUTH_REFRESH_SLIDING: 'off',
-      AUTH_TRUST_PROXY: 'on',
-    });
-
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.AUTH_REFRESH_SLIDING).toBe(false);
-      expect(result.data.AUTH_TRUST_PROXY).toBe(true);
-    }
-    expect(parse({ AUTH_TRUST_PROXY: 'maybe' }).success).toBe(false);
   });
 });

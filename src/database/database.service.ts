@@ -1,14 +1,15 @@
 import {
+  Inject,
   Injectable,
   Logger,
   OnApplicationShutdown,
   OnModuleInit,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { ENV } from '@/config/config.module.js';
+import type { Env } from '@/config/env.js';
 import { Pool } from 'pg';
 import { drizzle, NodePgDatabase } from 'drizzle-orm/node-postgres';
 
-import type { Env } from '@/config/env.js';
 import { formatError } from '@/logger/error-format.js';
 import * as schema from '@/database/schema/index.js';
 
@@ -20,10 +21,10 @@ export class DatabaseService implements OnModuleInit, OnApplicationShutdown {
   private readonly pool: Pool;
   readonly db: Db;
 
-  constructor(config: ConfigService<Env, true>) {
+  constructor(@Inject(ENV) env: Env) {
     this.pool = new Pool({
-      connectionString: config.getOrThrow('DATABASE_URL'),
-      max: config.get('DB_POOL_MAX', { infer: true }),
+      connectionString: env.DATABASE_URL,
+      max: env.DB_POOL_MAX,
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 5_000,
     });

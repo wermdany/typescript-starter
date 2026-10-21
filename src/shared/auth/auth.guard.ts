@@ -53,7 +53,7 @@ export class AuthGuard {
 /**
  * 全局守卫：把 Nest 的 `ExecutionContext` 翻译成 {@link AuthGuard} 的纯逻辑入参。
  *
- * 注册在 `app.config.ts` 的 `APP_GUARD`；`@Public()` / `@AdminOnly()` 元数据在这里读取，
+ * 注册在 `shared/auth/auth.module.ts` 的 `APP_GUARD`；`@Public()` / `@AdminOnly()` 元数据在这里读取，
  * 方法级覆盖类级。
  */
 @Injectable()

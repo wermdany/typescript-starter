@@ -1,6 +1,6 @@
 import type { Request } from 'express';
 
-import { AuthConfigService } from '@/config/auth.config.js';
+import type { AppConfig } from '@/config/app-config.js';
 import {
   describeClient,
   normalizeUserAgent,
@@ -22,12 +22,12 @@ export interface ClientContext extends ClientInfo {
  */
 export function clientContextOf(
   req: Request,
-  config: AuthConfigService,
+  config: AppConfig,
 ): ClientContext {
   const userAgent = normalizeUserAgent(req.headers['user-agent']);
   return {
     ...describeClient(userAgent),
-    ip: resolveClientIp(req, config.config.trustProxy),
+    ip: resolveClientIp(req, config.trustProxy),
     userAgent,
   };
 }

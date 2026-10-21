@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 
-import type { AuthConfigService } from '@/config/auth.config.js';
+import type { AppConfig } from '@/config/app-config.js';
+import type { Env } from '@/config/env.js';
 
 /**
  * refreshToken 的 Cookie 名（唯一出处，controller 与中间件共用）。
@@ -28,11 +29,11 @@ export function resolveRefreshToken(
 }
 
 /** Cookie 的公共属性：set 与 clear 必须一致，才能命中同一条 Cookie */
-function cookieOptions(config: AuthConfigService) {
+function cookieOptions(config: AppConfig, env: Env) {
   return {
     httpOnly: true,
     // __Host- 前缀要求浏览器强制 Secure；本地 HTTP 开发由 NODE_ENV 关闭
-    secure: config.config.refreshCookie.secure,
+    secure: env.NODE_ENV === 'production',
     // /auth/refresh 是唯一需要携带它的端点；Path 收窄缩小泄露面
     path: '/auth/refresh',
     // Strict：跨站请求不带 Cookie，CSRF 无从谈起（refresh 本身也不写业务数据）
@@ -44,18 +45,20 @@ function cookieOptions(config: AuthConfigService) {
 export function setRefreshCookie(
   res: Response,
   refreshToken: string,
-  config: AuthConfigService,
+  config: AppConfig,
+  env: Env,
 ): void {
   res.cookie(REFRESH_COOKIE, refreshToken, {
-    ...cookieOptions(config),
-    maxAge: config.config.refreshCookie.maxAgeMs,
+    ...cookieOptions(config, env),
+    maxAge: config.refreshTtlMs,
   });
 }
 
 /** 登出 / 被踢出时清除 Cookie（幂等：没有该 Cookie 也不报错） */
 export function clearRefreshCookie(
   res: Response,
-  config: AuthConfigService,
+  config: AppConfig,
+  env: Env,
 ): void {
-  res.clearCookie(REFRESH_COOKIE, cookieOptions(config));
+  res.clearCookie(REFRESH_COOKIE, cookieOptions(config, env));
 }

@@ -9,7 +9,7 @@
  * ```
  *
  * - 校验相关（zod）在 `validation.ts`，单独拆开是为了让 import 一眼看出来源
- * - 全局 HTTP 组件（过滤器/拦截器/校验管道）不放这里：它们只由 `app.config.ts` 与
+ * - 全局 HTTP 组件（过滤器/拦截器/校验管道）不放这里：它们只由 `app.core.module.ts` 与
  *   Controller 使用，直接从 `@/shared/http/*` 引入
  */
 

@@ -4,12 +4,10 @@ import {
   type ExecutionContext,
   Logger,
 } from '@nestjs/common';
-import type { ConfigService } from '@nestjs/config';
+import type { Env } from '@/config/env.js';
 import type { Request, Response } from 'express';
 import { firstValueFrom, of } from 'rxjs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-import type { Env } from '@/config/env.js';
 
 import { getLogLevels } from '@/logger/log-levels.js';
 import { RequestLoggingInterceptor } from '@/logger/request-logging.interceptor.js';
@@ -34,8 +32,9 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function makeConfig(logBody: boolean): ConfigService<Env, true> {
-  return { get: () => logBody } as unknown as ConfigService<Env, true>;
+function makeConfig(logBody: boolean): Env {
+  // 其余字段 interceptor 不读，类型上补齐即可
+  return { LOG_BODY: logBody } as unknown as Env;
 }
 
 function makeContext(

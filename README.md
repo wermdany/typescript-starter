@@ -22,7 +22,7 @@ pnpm install
 
 docker compose up -d db   # 本地 Postgres：localhost:5432/learn_nest
 
-# 按下方「环境变量」创建 .env（至少包含 DATABASE_URL）
+cp .env.example .env      # 按需修改（至少确认 DATABASE_URL）
 pnpm db:migrate           # 建表，并灌入 drizzle/0001 的种子用户
 pnpm start:dev            # 监听 http://localhost:8000
 ```
@@ -159,7 +159,7 @@ src/
 ├── main.ts             # 入口：日志、启动日志、listen
 ├── server.ts           # createApp()：创建应用并注册中间件（测试复用）
 ├── app.module.ts       # 根模块
-├── app.config.ts       # 全局过滤器 / 拦截器注册
+├── app.core.module.ts  # 全局组件的目录清单（守卫/拦截器/过滤器在各功能域自注册）
 ├── config/env.ts       # 环境变量 schema
 ├── common/             # 响应契约类型
 ├── shared/             # 常用件：common.js / validation.js 两个 barrel，

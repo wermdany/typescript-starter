@@ -11,6 +11,10 @@ import { SessionAuthHandler } from '@/modules/auth/session/session-auth.middlewa
 /**
  * 创建并初始化应用（不监听端口，便于测试直接调用）。
  *
+ * **应用级 provider**（守卫/拦截器/过滤器）在 `app.core.module.ts`；
+ * **请求中间件**只能在这里 `app.use()` 即时挂载（Nest 的 configure() 注册时机
+ * 晚于 body parser，见 AGENTS.md 第 13 节）—— 全局中间件顺序因此一个文件看完。
+ *
  * logger 由调用方注入 `NestFactory.create`：create 阶段的日志也要经由它输出。
  */
 export async function createApp(
@@ -19,10 +23,9 @@ export async function createApp(
   const app = await NestFactory.create(AppModule, { logger });
 
   // 顺序不可换，且都必须早于 listen()：trace 先建请求上下文并排在 body parser 之前，
-  // access 紧随其后（入口捕获 traceId），认证最后（解析 token → req.user）
+  // access 紧随其后（入口捕获 traceId），cookie 与认证最后（解析 token → req.user）
   app.use(traceContextMiddleware);
   app.use(accessLogMiddleware);
-  // 认证中间件要读 RT Cookie；在守卫/控制器之前挂载即可
   app.use(cookieParser());
   const sessionAuth = app.get(SessionAuthHandler);
   app.use(sessionAuth.use.bind(sessionAuth));

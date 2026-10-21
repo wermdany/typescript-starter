@@ -45,12 +45,13 @@ curl -s 'http://localhost:8000/users?pageSize=1'
 src/
 ├── main.ts                       # 入口：loadEnv + FileLogger + createApp + listen + 启动日志
 ├── server.ts                     # createApp()：创建应用、注册中间件，不监听端口（测试复用）
-├── app.module.ts                 # 根模块：ConfigModule / AppConfigModule / DatabaseModule / 业务模块
-├── app.config.ts                 # APP_FILTER / APP_INTERCEPTOR 集中注册
+├── app.module.ts                 # 根模块：ConfigProviderModule / AppCoreModule / DatabaseModule / 业务模块
+├── app.core.module.ts            # 全局组件的"目录清单"：import 各功能域的自注册模块
 ├── __tests__/                    # 应用级测试（真实启一个应用，mock 掉数据库）
 ├── config/
-│   ├── env.ts                    # 全部环境变量的 zod schema（唯一出处）+ loadEnv()
-│   ├── auth.config.ts            # 认证配置对象（由 env 派生，模块与用例层只认它）
+│   ├── env.ts                    # 环境变量 schema（唯一声明处）+ loadEnv()（带单例缓存）
+│   │                             #   + Env 强类型 / AuthConfig 派生视图（toAuthConfig）
+│   ├── config.module.ts          #   配置统一注入口：ENV / AUTH_CONFIG 两个 @Global provider
 │   └── __tests__/
 ├── common/
 │   ├── api-response/api-response.ts  # 响应契约类型 + 默认文案常量（只放类型）
@@ -64,19 +65,24 @@ src/
 │   ├── pagination/               #   paginate() + paginationSchema
 │   ├── validation/               #   trimmed/trimmedShape、passwordSchema（含 __tests__/）
 │   ├── crypto/password.scrypt.ts #   scrypt 哈希/校验
-│   ├── auth/                     #   认证基础件（不依赖任何业务模块）
+│   ├── auth/                     #   认证基础件 + 全局守卫的自注册模块
+│   │   ├── auth.module.ts        #     APP_GUARD（HttpAuthGuard）注册；找守卫注册来这里
+│   │   ├── auth.guard.ts         #     AuthGuard（纯逻辑）+ HttpAuthGuard
 │   │   ├── token.ts              #     generateToken / hashToken / 空哈希（假校验对齐耗时）
 │   │   ├── client-info.ts        #     UA → 设备摘要、XFF → 客户端 IP
-│   │   ├── decorators/           #     @Public / @AdminOnly / @CurrentUser
-│   │   └── auth.guard.ts         #     AuthGuard（纯逻辑）+ HttpAuthGuard（APP_GUARD）
-│   └── http/                     #   全局 HTTP 组件：HttpExceptionFilter / TransformInterceptor /
-│                                 #   ZodValidationPipe（只由 app.config.ts 与 Controller 用，不进 barrel）
+│   │   └── decorators/           #     @Public / @AdminOnly / @CurrentUser
+│   └── http/                     #   HTTP 契约 + 自注册模块
+│       ├── http.module.ts        #     APP_FILTER（异常）+ APP_INTERCEPTOR（成功包装）；找契约注册来这里
+│       ├── http-exception.filter.ts
+│       ├── transform.interceptor.ts
+│       └── zod-validation.pipe.ts #    按参数显式注册的管道，不走全局机制
 ├── database/                     # @Global 数据库模块
 │   ├── database.module.ts        # DatabaseModule
 │   ├── database.service.ts       # DatabaseService（连接池 + drizzle 实例 + 事务助手）
 │   └── schema/                   # columns.ts（timestamps()）/ index.ts / *.schema.ts
 ├── logger/                       # FileLogger、trace、access-log、body 日志、错误格式化、进程级兜底
-│   ├── failure-summary.ts        # 失败摘要的类型与 res.locals 键名（过滤器与访问日志共用）
+│   ├── logger.module.ts          #   APP_INTERCEPTOR（body 日志）；找日志拦截器注册来这里
+│   ├── failure-summary.ts        #   失败摘要的类型与 res.locals 键名（过滤器与访问日志共用）
 │   └── __tests__/
 ├── startup/local-addresses.ts    # 启动时枚举可访问地址
 └── modules/<domain>/             # 业务模块（当前有 user、auth）
@@ -125,6 +131,13 @@ kebab-case。禁止自造后缀（`*.use-case.ts` / `*.projection.ts` / `*.handl
 
 文件名读法 = 目录（域）+ 文件名（职责）：`session/session.service.ts`、
 `login/refresh.service.ts` —— 找代码先找域目录，再看 service/dto/controller。
+
+**全局组件自注册**（对账表见 `app.core.module.ts` 头注释）：每个功能域的
+`*.module.ts` 自带 `APP_GUARD` / `APP_FILTER` / `APP_INTERCEPTOR` 注册——
+"谁提供了什么全局能力"看组件自己的目录，不用去装配模块里对账；
+`app.core.module.ts` 只 import 这些模块，**不直接声明任何 provider**。
+唯一例外：请求中间件（trace/access/cookie/认证）因注册时序必须留在
+`server.ts` 的 `createApp()`（见第 13 节）。
 
 **分层**：Controller 只做路由与参数校验；Service 承载全部业务逻辑（SQL、哈希、异常转换）；
 对外字段由 `dto/` 里的列白名单界定；DTO 用 zod schema 定义并导出 `z.infer` 类型。
@@ -179,10 +192,14 @@ pnpm db:studio        # 可视化查看数据
 ## 4. 环境变量
 
 所有环境变量集中在 `src/config/env.ts` 的 `envSchema` 里声明。**校验只有一个入口**：
-`main.ts` 启动时调 `loadEnv()` 解析 `process.env`，缺失或非法直接启动失败并列出所有问题。
-`ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true })` 不再挂 `validationSchema` ——
-它会在同一个进程内每个 TestingModule 实例化时重复校验，而配置早已由 `loadEnv()` 保证，
-`DatabaseService` 等通过 `ConfigService` 读取时拿到的就是已校验的值。
+`main.ts` 启动时调 `loadEnv()` 解析 `process.env`，缺失或非法直接启动失败并列出所有问题；
+解析结果有单例缓存，`config.module.ts` 复用同一次解析。
+
+**配置统一注入**：`config/config.module.ts` 提供 `ENV`（全量强类型 Env，
+`@Inject(ENV)` 拿到后 `env.DATABASE_URL` 直取）与 `AUTH_CONFIG`（认证派生视图）
+两个 @Global provider；`main.ts` 启动时 `loadEnv()` 解析一次，模块复用其缓存。
+**业务代码不再逐键 `ConfigService.get()`**（ConfigService 仅保留在
+`config.module.ts` 内部），也不再散落第二个注入口。
 
 规则：
 
@@ -193,24 +210,28 @@ pnpm db:studio        # 可视化查看数据
 - **不要在 transform 里 `throw`**：zod v4 的 `safeParse` 不接 transform 抛出的错误（直接冒泡），
   要报失败请让值落到 `z.enum` 之类的 issue
 - **新增变量必须同步进 schema**
-- 业务代码取配置用 `ConfigService<Env, true>` + `get('KEY', { infer: true })` / `getOrThrow`，
-  **禁止**业务代码直接读 `process.env`
+- 业务代码取配置用 `@Inject(ENV) env: Env`（强类型、整对象直取），
+  **禁止**逐键 `ConfigService.get()`、**禁止**直接读 `process.env`
 - `.env` 由用户自行维护，不入库；`.env.local` 已 gitignore
+- **`.env.example` 是全部变量的模板**（16 个，与 schema 一一对应，含注释与默认值），
+  新增变量必须同步更新它；`.gitignore` 用 `!.env.example` 放行入库
 
 当前变量：`NODE_ENV`、`PORT`、`LOG_LEVEL`、`LOG_FILE`、`LOG_BODY`、`DATABASE_URL`（必填）、
 `DB_POOL_MAX`、`AUTH_ACCESS_TTL_MINUTES`、`AUTH_REFRESH_TTL_DAYS`、`AUTH_REFRESH_SLIDING`、
 `AUTH_REFRESH_WINDOW_MINUTES`、`AUTH_MAX_SESSIONS_PER_USER`、`AUTH_LOGIN_MAX_ATTEMPTS`、
-`AUTH_LOGIN_WINDOW_MINUTES`、`AUTH_TRUST_PROXY`。
+`AUTH_LOGIN_WINDOW_MINUTES`、`AUTH_TRUST_PROXY`、`AUTH_REFRESH_COOKIE`。
 
 **账号数据是真实数据**：不做演示账号注入/校准。登录账号、角色与密码哈希由部署方
 直接在数据库中维护（哈希用 `hashPassword()` 生成，格式 `scrypt$N$r$p$saltHex$hashHex`）。
 
 **例外**：`main.ts` 用 `loadEnv()` 直接取配置 —— `FileLogger` 必须早于 DI 容器就绪
-（要注入 `NestFactory.create`），此时拿不到 `ConfigService`。其余代码一律用 `ConfigService`。
+（要注入 `NestFactory.create`）。其余代码一律 `@Inject(ENV)` 取强类型配置对象。
 
-**认证配置不进业务代码**：`ConfigService` 只在 `AuthConfigService` 里读一次，转成
-`AuthConfig`（`src/config/auth.config.ts`）注入给会话/用例层。业务代码拿的是配置对象，
-不感知环境变量名；改默认值、加配置项只动 `auth.config.ts` 一处。
+**认证配置是 env 的派生视图**：`env.ts` 里的 `toAuthConfig(env)` 把 `AUTH_*` 变量
+换算成业务视角的 `AuthConfig`（毫秒、Cookie 属性等），由 `config.module.ts` 提供
+`AUTH_CONFIG` provider（@Global，`@Inject(AUTH_CONFIG)` 注入）。业务代码拿的是
+配置对象，感知不到环境变量名；改默认值、加配置项只动 `env.ts` 一处
+（schema + toAuthConfig 相邻，不会再跳文件）。
 
 ---
 
@@ -573,6 +594,9 @@ const result = await paginate(
 ## 13. 已知坑
 
 - **启动开发服务器会触发 safe-delete 保护**（`deleteOutDir: true`）→ 见第 0 节
+- **`nest build` / `pnpm build` 会杀掉 watch 进程**：`deleteOutDir: true` 先删 `dist/`，
+  正在 watch 的进程丢失编译产物直接退出且不再重试 —— 改代码前确认没有正在跑的
+  `start:dev`，或改用 `tsc --noEmit` 做类型检查
 - **drizzle 包装 pg 错误**：判断 `23505` 必须先读 `err.cause`
 - **`timestamps()` 是函数**：写成共享对象常量会导致多表列名错乱
 - **`updatedAt` 不自动更新**：所有 update 手动 set
@@ -587,8 +611,10 @@ const result = await paginate(
 - **`bufferLogs: true` 无效**：`init()` 末尾会先 flush；logger 必须注入 `NestFactory.create`
 - **`z.coerce.boolean()` 会把 `'false'` 判成 `true`** → 用 `envBoolean()`（第 4 节）
 - **zod v4 的 transform 里 `throw` 不被 `safeParse` 接住** → 用 `z.enum` 报 issue
-- **body parser 早于 `NestModule.configure()`**：中间件要覆盖 malformed JSON / 无路由 404，
-  必须在 `createApp()`（`server.ts`）里 `app.use()` 早注册
+- **body parser 早于 `NestModule.configure()`**：trace/access 中间件要覆盖
+  malformed JSON / 无路由 404，必须在 `createApp()`（`server.ts`）里 `app.use()` 即时挂载；
+  放进某个 Module 的 `configure()` 会排在 jsonParser 之后（实测层序），
+  malformed JSON 的 400 就没有 traceId —— 不要尝试把请求中间件搬进模块
 - **`source-map-support` 不再使用**：改用 Node 原生 `--enable-source-maps`，不要 import 它
 - **异常日志用单个字符串**：第二个字符串参数会被当成 context
 - **排查 500 先看 `caused by:`**：只有外层 `Failed query: ...` 说明根因没展开

@@ -2,7 +2,7 @@ import { HttpException, UnauthorizedException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 
 import { LoginService } from '@/modules/auth/login/login.service.js';
-import type { AuthConfigService } from '@/config/auth.config.js';
+import type { AppConfig } from '@/config/app-config.js';
 import type { ClientContext } from '@/modules/auth/login/client-context.js';
 import { DUMMY_PASSWORD_HASH } from '@/shared/auth/token.js';
 import { hashPassword } from '@/shared/common.js';
@@ -10,18 +10,15 @@ import { hashPassword } from '@/shared/common.js';
 /** 认证配置（限流阈值 3 次便于触发） */
 function configStub() {
   return {
-    config: {
-      session: {
-        accessTtlMs: 120 * 60_000,
-        refreshTtlMs: 7 * 24 * 60 * 60_000,
-        slidingRefresh: true,
-        refreshWindowMs: 5 * 60_000,
-        maxSessionsPerUser: 2,
-      },
-      login: { maxAttempts: 3, windowMs: 15 * 60_000 },
-      trustProxy: false,
-    },
-  } as unknown as AuthConfigService;
+    accessTtlMs: 120 * 60_000,
+    refreshTtlMs: 7 * 24 * 60 * 60_000,
+    slidingRefresh: true,
+    refreshWindowMs: 5 * 60_000,
+    maxSessionsPerUser: 2,
+    loginMaxAttempts: 3,
+    loginWindowMs: 15 * 60_000,
+    trustProxy: false,
+  } as unknown as AppConfig;
 }
 
 const CLIENT: ClientContext = {

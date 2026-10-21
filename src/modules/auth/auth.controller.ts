@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Inject,
   Param,
   Patch,
   Post,
@@ -23,7 +24,9 @@ import {
   Public,
   type AuthenticatedUser,
 } from '@/shared/auth.js';
-import { AuthConfigService } from '@/config/auth.config.js';
+import { APP_CONFIG, type AppConfig } from '@/config/app-config.js';
+import { ENV } from '@/config/config.module.js';
+import type { Env } from '@/config/env.js';
 import { clientContextOf } from '@/modules/auth/login/client-context.js';
 import { LoginLogService } from '@/modules/auth/log/login-log.service.js';
 import {
@@ -61,7 +64,8 @@ import {
 @Controller()
 export class AuthController {
   constructor(
-    private readonly config: AuthConfigService,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Inject(ENV) private readonly env: Env,
     private readonly login: LoginService,
     private readonly refresh: RefreshService,
     private readonly logoutUseCase: LogoutService,
@@ -96,8 +100,8 @@ export class AuthController {
     result: T,
     res: Response,
   ) {
-    if (this.config.config.refreshCookie.enabled) {
-      setRefreshCookie(res, result.refreshToken, this.config);
+    if (this.config.refreshCookieEnabled) {
+      setRefreshCookie(res, result.refreshToken, this.config, this.env);
       const { refreshToken: _omitted, ...body } = result;
       return body;
     }
@@ -138,6 +142,12 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
     await this.logoutUseCase.execute(user);
-    clearRefreshCookie(res, this.config);
+    clearRefreshCookie(res, this.config, this.env);
+  }
+
+  /** 当前身份（前端刷新页面后据此重建本地登录态） */
+  @Get('auth/me')
+  currentUser(@CurrentUser() user: AuthenticatedUser): Promise<MeResult> {
+    return this.me.execute(user);
   }
 }

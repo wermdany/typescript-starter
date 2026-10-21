@@ -2,11 +2,12 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  Inject,
   Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 
-import { AuthConfigService } from '@/config/auth.config.js';
+import { APP_CONFIG, type AppConfig } from '@/config/app-config.js';
 import { DatabaseService } from '@/database/database.service.js';
 import { verifyPassword } from '@/shared/common.js';
 import {
@@ -62,7 +63,7 @@ export class LoginService {
   private readonly logger = new Logger('Login');
 
   constructor(
-    private readonly config: AuthConfigService,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly database: DatabaseService,
     private readonly accounts: AccountService,
     private readonly tokens: TokenService,
@@ -72,7 +73,8 @@ export class LoginService {
 
   async execute(command: LoginCommand): Promise<LoginResult> {
     const { studentNo, password, client } = command;
-    const { maxAttempts, windowMs } = this.config.config.login;
+    const { loginMaxAttempts: maxAttempts, loginWindowMs: windowMs } =
+      this.config;
 
     // 1. 限流：同一 学号 + IP 在窗口内失败过多时直接拒绝，避免继续消耗 scrypt
     const failures = await this.loginLogs.countRecentFailures(
@@ -116,7 +118,7 @@ export class LoginService {
 
     // 4. 建会话（含并发上限淘汰）+ 成功审计：同一事务，审计不会出现"有会话没记录"
     const pair = this.tokens.issue();
-    const { maxSessionsPerUser } = this.config.config.session;
+    const { maxSessionsPerUser } = this.config;
     const sessionId = await this.database.transaction(async (tx) => {
       const id = await this.sessions.createWithLimit(
         account.user.id,

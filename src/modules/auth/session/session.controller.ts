@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Inject,
   Param,
   Post,
   Query,
@@ -19,7 +20,9 @@ import {
   CurrentUser,
   type AuthenticatedUser,
 } from '@/shared/auth.js';
-import { AuthConfigService } from '@/config/auth.config.js';
+import { APP_CONFIG, type AppConfig } from '@/config/app-config.js';
+import { ENV } from '@/config/config.module.js';
+import type { Env } from '@/config/env.js';
 import { clearRefreshCookie } from '@/modules/auth/login/refresh-cookie.js';
 import {
   querySessionsSchema,
@@ -51,7 +54,8 @@ export type SessionWithCurrent = SessionResponse & { current: boolean };
 @Controller()
 export class SessionController {
   constructor(
-    private readonly config: AuthConfigService,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Inject(ENV) private readonly env: Env,
     private readonly sessions: SessionManagerService,
   ) {}
 
@@ -68,7 +72,7 @@ export class SessionController {
   ): Promise<RevokeAllResult> {
     const result = await this.sessions.revokeAllMine(user, dto);
     if (result.currentRevoked) {
-      clearRefreshCookie(res, this.config);
+      clearRefreshCookie(res, this.config, this.env);
     }
     return result;
   }
@@ -95,7 +99,7 @@ export class SessionController {
   ): Promise<void> {
     await this.sessions.revokeMine(user, sessionId);
     if (sessionId === user.sessionId) {
-      clearRefreshCookie(res, this.config);
+      clearRefreshCookie(res, this.config, this.env);
     }
   }
 

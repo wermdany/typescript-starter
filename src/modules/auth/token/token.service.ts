@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 
-import { AuthConfigService } from '@/config/auth.config.js';
+import { APP_CONFIG, type AppConfig } from '@/config/app-config.js';
 import { generateToken, hashToken } from '@/shared/auth/token.js';
 
 /** 一次签发产生的双 token（明文只在响应里出现一次） */
@@ -24,7 +24,7 @@ export interface IssuedTokenPair {
  */
 @Injectable()
 export class TokenService {
-  constructor(private readonly config: AuthConfigService) {}
+  constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
 
   /**
    * 签发一对新 token。
@@ -37,8 +37,7 @@ export class TokenService {
     now: Date = new Date(),
     options: { sliding?: boolean; previousRefreshExpiresAt?: Date } = {},
   ): IssuedTokenPair {
-    const { accessTtlMs, refreshTtlMs, slidingRefresh } =
-      this.config.config.session;
+    const { accessTtlMs, refreshTtlMs, slidingRefresh } = this.config;
     const sliding = options.sliding ?? slidingRefresh;
     const accessToken = generateToken();
     const refreshToken = generateToken();
@@ -85,9 +84,7 @@ export class TokenService {
       ),
       refreshTokenExpiresAt: pair.refreshExpiresAt,
       /** 建议前端在 accessToken 剩余时间低于该值时静默续期 */
-      refreshWindowSeconds: Math.round(
-        this.config.config.session.refreshWindowMs / 1000,
-      ),
+      refreshWindowSeconds: Math.round(this.config.refreshWindowMs / 1000),
     };
   }
 }
