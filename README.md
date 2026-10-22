@@ -106,7 +106,7 @@ pnpm db:studio        # 可视化查看数据
 | `GET` | `/users/:id/login-logs` | 管理员 | 某用户的登录记录 |
 
 - 列表默认按修改时间（`updatedAt`）降序，`pageSize` 上限 100
-- 响应字段由 `src/modules/user/user.projection.ts` 的列白名单决定，不含 `passwordHash` / `deletedAt`
+- 响应字段由 `src/modules/user/dto/user.dto.ts` 的列白名单决定，不含 `passwordHash` / `deletedAt`
 - 分页响应：`{ items, total, page, pageSize, totalPages }`
 
 ### 认证与授权
@@ -167,7 +167,7 @@ src/
 ├── database/           # DatabaseService 与 schema
 ├── logger/             # 文件日志、trace、访问日志、脱敏、错误格式化
 ├── startup/            # 启动地址枚举
-└── modules/user/       # 用户模块（controller / service / projection / dto）
+└── modules/user/       # 用户模块（controller / service / dto）
 
 跨目录导入用 @/ 别名：import { trimmedShape } from '@/shared/validation.js';
 测试与被测代码同目录：每个目录或模块下的 __tests__/ 存放 *.spec.ts

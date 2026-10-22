@@ -3,9 +3,6 @@ import { SetMetadata } from '@nestjs/common';
 /** `AuthGuard` 读取该 metadata 判断路由是否免登录 */
 export const PUBLIC_KEY = 'auth:public';
 
-/** `AuthGuard` 读取该 metadata 判断路由是否只允许管理员 */
-export const ADMIN_ONLY_KEY = 'auth:adminOnly';
-
 /** `PermissionGuard` 读取该 metadata：显式声明"登录即可，不需要任何权限码" */
 export const AUTHENTICATED_KEY = 'auth:authenticated';
 
@@ -22,18 +19,6 @@ export const AUTHENTICATED_KEY = 'auth:authenticated';
  * @Post('login')
  */
 export const Public = () => SetMetadata(PUBLIC_KEY, true);
-
-/**
- * 标记仅管理员可访问的路由（未登录同样 401，已登录但非管理员 403）。
- *
- * @deprecated 已被权限点取代：新代码用 `@RequirePermission('资源:动作')`。
- * 本装饰器在迁移期为"已追踪"状态（`pnpm perm:audit` 会提示升级）。
- *
- * @example
- * @AdminOnly()
- * @Delete('sessions/:id')
- */
-export const AdminOnly = () => SetMetadata(ADMIN_ONLY_KEY, true);
 
 /**
  * 标记「登录即可」的路由：不需要任何权限码，但必须有身份。

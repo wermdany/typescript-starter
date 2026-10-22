@@ -48,7 +48,7 @@ import {
   userPublicColumns,
   type UserResponse,
   type UserScalars,
-} from './user.projection.js';
+} from './dto/user.dto.js';
 
 /** 用户管理服务：全部业务逻辑（Drizzle 查询、密码哈希、越权判定、错误转换） */
 @Injectable()

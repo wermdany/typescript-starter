@@ -57,7 +57,7 @@ import {
  *
  * 路由分组：
  * - `/auth/*`：本人视角（登录、续期、登出、我的设备、我的登录记录、当前身份）
- * - `/users/:id/sessions*`、`/users/:id/login-logs`：管理员视角（`@AdminOnly()`）
+ * - `/users/:id/sessions*`、`/users/:id/login-logs`：管理员视角（`@RequirePermission()`）
  *
  * 静态段路由一律排在带 `:id` 的路由之前；路径参数收在 URL 末尾。
  */

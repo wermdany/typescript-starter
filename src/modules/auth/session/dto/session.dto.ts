@@ -49,6 +49,6 @@ export type SessionRow = Pick<
  *
  * 这里显式列出字段而不是 `Pick<AuthSessions, keyof typeof sessionPublicColumns>`：
  * 白名单里有改名（`expiresAt ← refreshExpiresAt`），键推导会要求表里存在同名字段。
- * 字段集合仍由 `session.projection.spec.ts` 冻结，加列必须同步改测试。
+ * 字段集合仍由本子域的契约测试冻结，加列必须同步改测试。
  */
 export type SessionResponse = SessionRow;

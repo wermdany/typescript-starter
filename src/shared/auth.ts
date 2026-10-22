@@ -1,7 +1,7 @@
 /**
  * 认证基础件的统一出口：守卫、装饰器、token 与客户端信息工具、401/403/429 文案。
  *
- * 这一层只管"身份"：是否登录、是否管理员；业务权限点（RBAC）后续迭代再接。
+ * 这一层只管"身份"：是否登录；管理员与业务权限点都由 RBAC 层（`PermissionGuard`）管。
  * 依赖 Nest 与 express，但**不依赖任何业务模块、数据库与配置** ——
  * 因此 `shared/auth/auth.module.ts`（注册全局守卫）与后续模块都可以安全引用。
  *
@@ -9,9 +9,7 @@
  * import { Public, CurrentUser, type AuthenticatedUser } from '@/shared/auth.js';
  */
 export {
-  ADMIN_ONLY_KEY,
   AUTHENTICATED_KEY,
-  AdminOnly,
   Authenticated,
   PUBLIC_KEY,
   Public,

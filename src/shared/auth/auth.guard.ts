@@ -10,9 +10,7 @@ import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 
 import {
-  FORBIDDEN_MESSAGE,
   UNAUTHENTICATED_MESSAGE,
-  isAdmin,
   type AuthenticatedUser,
 } from '@/common/auth/auth.contract.js';
 import {
@@ -23,7 +21,6 @@ import {
   type PermissionCode,
 } from '@/common/auth/permission.contract.js';
 import {
-  ADMIN_ONLY_KEY,
   AUTHENTICATED_KEY,
   PUBLIC_KEY,
 } from '@/shared/auth/decorators/auth.decorator.js';
@@ -37,14 +34,13 @@ import {
 export interface AuthRequirement {
   /** 公开路由：免登录 */
   isPublic: boolean;
-  /** 仅管理员 */
-  adminOnly: boolean;
 }
 
 /**
  * 认证守卫（纯逻辑，**不碰 HTTP 上下文**）。
  *
- * 只做两件事：没有身份 → 401；仅管理员的路由但角色不是 admin → 403。
+ * 只做一件事：没有身份 → 401。管理员判定不在这里 —— 角色与权限点统一由
+ * 更上层的 `PermissionGuard` 管（`@AdminOnly` 已随 RBAC 全部替换而移除）。
  * 身份由 `modules/auth` 的中间件查会话后写入 `req.user`，守卫不查库，
  * 这样守卫可以在不需要 DatabaseService 的测试里直接构造。
  *
@@ -57,9 +53,6 @@ export class AuthGuard {
   ): boolean {
     if (requirement.isPublic) return true;
     if (!user) throw new UnauthorizedException(UNAUTHENTICATED_MESSAGE);
-    if (requirement.adminOnly && !isAdmin(user)) {
-      throw new ForbiddenException(FORBIDDEN_MESSAGE);
-    }
     return true;
   }
 }
@@ -67,7 +60,7 @@ export class AuthGuard {
 /**
  * 全局守卫：把 Nest 的 `ExecutionContext` 翻译成 {@link AuthGuard} 的纯逻辑入参。
  *
- * 注册在 `shared/auth/auth.module.ts` 的 `APP_GUARD`；`@Public()` / `@AdminOnly()` 元数据在这里读取，
+ * 注册在 `shared/auth/auth.module.ts` 的 `APP_GUARD`；`@Public()` 元数据在这里读取，
  * 方法级覆盖类级。
  */
 @Injectable()
@@ -81,15 +74,11 @@ export class HttpAuthGuard implements CanActivate {
     const targets = [context.getHandler(), context.getClass()];
     const isPublic =
       this.reflector.getAllAndOverride<boolean>(PUBLIC_KEY, targets) ?? false;
-    const adminOnly =
-      this.reflector.getAllAndOverride<boolean>(ADMIN_ONLY_KEY, targets) ??
-      false;
 
-    if (isPublic)
-      return this.guard.canActivate(undefined, { isPublic, adminOnly });
+    if (isPublic) return this.guard.canActivate(undefined, { isPublic });
 
     const request = context.switchToHttp().getRequest<Request>();
-    return this.guard.canActivate(request.user, { isPublic, adminOnly });
+    return this.guard.canActivate(request.user, { isPublic });
   }
 }
 
@@ -167,7 +156,7 @@ export class PermissionGuard {
  * 全局权限守卫：把 Nest 的 `ExecutionContext` 翻译成 {@link PermissionGuard} 的入参。
  *
  * 注册在 `modules/rbac/rbac.module.ts` 的 `APP_GUARD`。与 `HttpAuthGuard` 分工：
- * 那个管"有没有登录 / 是不是管理员"，这个管"有没有某个权限点"。
+ * 那个管"有没有登录"，这个管"有没有某个权限点 / 是不是资源本人"。
  * 本守卫在无身份时也返回 401，所以两者谁先执行都不影响结果。
  */
 @Injectable()

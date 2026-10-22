@@ -15,7 +15,7 @@
  * 2. `message` 是给人看的文案（可直接 toast），不是机器判据 —— 客户端只按
  *    `success` / HTTP 状态码 / `errors[].path` 分支
  *
- * `data` 里有哪些字段由 `<domain>.projection.ts` 的列白名单决定。
+ * `data` 里有哪些字段由 `dto/<domain>.dto.ts` 的列白名单决定。
  */
 
 /** 字段级校验错误 */

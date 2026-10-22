@@ -34,7 +34,7 @@ import {
 } from './dto/params.dto.js';
 import { queryUsersSchema, type QueryUsersDto } from './dto/query-users.dto.js';
 import { updateUserSchema, type UpdateUserDto } from './dto/update-user.dto.js';
-import { type UserResponse } from './user.projection.js';
+import { type UserResponse } from './dto/user.dto.js';
 import { UserService } from './user.service.js';
 
 /**
