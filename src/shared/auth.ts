@@ -1,27 +1,22 @@
 /**
- * 认证基础件的统一出口：守卫、装饰器、token 与客户端信息工具、401/403/429 文案。
+ * 认证**纯工具**的统一出口：归属断言、token、客户端信息、401/403/429 文案。
  *
- * 这一层只管"身份"：是否登录；管理员与业务权限点都由 RBAC 层（`PermissionGuard`）管。
- * 依赖 Nest 与 express，但**不依赖任何业务模块、数据库与配置** ——
- * 因此 `shared/auth/auth.module.ts`（注册全局守卫）与后续模块都可以安全引用。
+ * 这一层只管"身份相关的纯计算/纯断言"，**不含 Nest 组件** ——
+ * 守卫与访问意图装饰器在 `@/common/auth/`（`access.guard.ts` / `access.decorator.ts`），
+ * 因为它们是横切能力、由 `common/http-stages.ts` 统一注册。
+ *
+ * 依赖 Nest（`assertOwnership` 抛 `ForbiddenException`）与 express，但**不依赖任何
+ * 业务模块、数据库与配置**，因此 `modules/*` 的 service 与 Controller 都可以安全引用。
  *
  * @example
- * import { Public, CurrentUser, type AuthenticatedUser } from '@/shared/auth.js';
+ * import {
+ *   PERMISSION_CHECKER,
+ *   assertOwnership,
+ *   isSystemActor,
+ *   type Actor,
+ *   type PermissionChecker,
+ * } from '@/shared/auth.js';
  */
-export {
-  AUTHENTICATED_KEY,
-  Authenticated,
-  PUBLIC_KEY,
-  Public,
-} from '@/shared/auth/decorators/auth.decorator.js';
-export {
-  OWNER_KEY,
-  PERMISSION_KEY,
-  OwnerOrPermission,
-  RequirePermission,
-  type OwnerRequirement,
-} from '@/shared/auth/decorators/rbac.decorator.js';
-export { CurrentUser } from '@/shared/auth/decorators/current-user.decorator.js';
 export {
   OWNERSHIP_DENIED_MESSAGE,
   assertOwnership,
@@ -35,15 +30,6 @@ export {
   type Actor,
   type SystemActor,
 } from '@/common/auth/ownership.contract.js';
-export {
-  AuthGuard,
-  HttpAuthGuard,
-  HttpPermissionGuard,
-  PermissionGuard,
-  type AuthRequirement,
-  type PermissionContext,
-  type PermissionRequirement,
-} from '@/shared/auth/auth.guard.js';
 export { ADMIN_ROLE, isAdmin } from '@/common/auth/auth.contract.js';
 export {
   DUMMY_PASSWORD_HASH,

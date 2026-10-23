@@ -1,29 +1,24 @@
 import {
-  Body,
   Controller,
-  Delete,
   Get,
   HttpCode,
   HttpStatus,
   Inject,
-  Param,
-  Patch,
   Post,
-  Query,
   Req,
   Res,
   UnauthorizedException,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 
-import { ApiMessage, type PageResponse } from '@/shared/common.js';
-import { ZodValidationPipe } from '@/shared/http/zod-validation.pipe.js';
+import { ApiMessage } from '@/common/api-response/response.decorator.js';
 import {
   Authenticated,
   CurrentUser,
   Public,
   type AuthenticatedUser,
-} from '@/shared/auth.js';
+} from '@/common/auth/access.decorator.js';
+import { ZodBody } from '@/common/validation/param.decorator.js';
 import { APP_CONFIG, type AppConfig } from '@/config/app-config.js';
 import { ENV } from '@/config/config.module.js';
 import type { Env } from '@/config/env.js';
@@ -83,7 +78,7 @@ export class AuthController {
   @ApiMessage('登录成功')
   @Post('auth/login')
   async signIn(
-    @Body(new ZodValidationPipe(loginSchema)) dto: LoginDto,
+    @ZodBody(loginSchema) dto: LoginDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
@@ -118,7 +113,7 @@ export class AuthController {
   @ApiMessage('续期成功')
   @Post('auth/refresh')
   async refreshTokens(
-    @Body(new ZodValidationPipe(refreshSchema)) dto: RefreshDto,
+    @ZodBody(refreshSchema) dto: RefreshDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {

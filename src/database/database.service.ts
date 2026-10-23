@@ -10,7 +10,7 @@ import type { Env } from '@/config/env.js';
 import { Pool } from 'pg';
 import { drizzle, NodePgDatabase } from 'drizzle-orm/node-postgres';
 
-import { formatError } from '@/logger/error-format.js';
+import { formatError } from '@/common/logging/error-format.js';
 import * as schema from '@/database/schema/index.js';
 
 export type Db = NodePgDatabase<typeof schema>;

@@ -1,19 +1,18 @@
 import { type INestApplication, type LoggerService } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import cookieParser from 'cookie-parser';
 
 import { AppModule } from './app.module.js';
-import { accessLogMiddleware } from '@/logger/access-log.middleware.js';
+import { registerRequestStages } from '@/common/http-stages.js';
 import { registerProcessErrorHandlers } from '@/logger/process-error.js';
-import { traceContextMiddleware } from '@/logger/trace.middleware.js';
-import { SessionAuthHandler } from '@/modules/auth/session/session-auth.middleware.js';
+import { SessionAuthenticator } from '@/modules/auth/session/session-auth.middleware.js';
 
 /**
  * 创建并初始化应用（不监听端口，便于测试直接调用）。
  *
- * **应用级 provider**（守卫/拦截器/过滤器）在 `app.core.module.ts`；
- * **请求中间件**只能在这里 `app.use()` 即时挂载（Nest 的 configure() 注册时机
- * 晚于 body parser，见 AGENTS.md 第 13 节）—— 全局中间件顺序因此一个文件看完。
+ * **全局守卫 / 拦截器 / 过滤器**在 `common/http-stages.ts`（`HttpStagesModule`）；
+ * **请求中间件**只能在这里经 `registerRequestStages()` 即时挂载 —— 它们必须排在
+ * Express 内置 body parser 之前，否则 malformed JSON 的 400 与未匹配路由的 404
+ * 会丢 traceId（见 `http-stages.ts` 头注释）。
  *
  * logger 由调用方注入 `NestFactory.create`：create 阶段的日志也要经由它输出。
  */
@@ -22,13 +21,11 @@ export async function createApp(
 ): Promise<INestApplication> {
   const app = await NestFactory.create(AppModule, { logger });
 
-  // 顺序不可换，且都必须早于 listen()：trace 先建请求上下文并排在 body parser 之前，
-  // access 紧随其后（入口捕获 traceId），cookie 与认证最后（解析 token → req.user）
-  app.use(traceContextMiddleware);
-  app.use(accessLogMiddleware);
-  app.use(cookieParser());
-  const sessionAuth = app.get(SessionAuthHandler);
-  app.use(sessionAuth.use.bind(sessionAuth));
+  // 认证中间件从容器取出后交进去：`common/` 因此不必依赖 `modules/auth`
+  const authenticator = app.get(SessionAuthenticator);
+  registerRequestStages(app, {
+    authenticate: (req, res, next) => void authenticator.use(req, res, next),
+  });
 
   // 进程级兜底要在 logger 接管之后注册，否则落到默认 logger
   registerProcessErrorHandlers();

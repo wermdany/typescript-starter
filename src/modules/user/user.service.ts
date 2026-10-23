@@ -54,7 +54,13 @@ import {
   type UserScalars,
 } from './dto/user.dto.js';
 
-/** 用户管理服务：全部业务逻辑（Drizzle 查询、密码哈希、越权判定、错误转换） */
+/**
+ * 用户管理服务：全部业务逻辑（Drizzle 查询、密码哈希、越权判定）。
+ *
+ * 唯一约束冲突（23505）**不在这里转 409**：全局错误映射链
+ * （`common/api-response/error-mapping.ts`）统一负责，因此本文件没有一处
+ * `catch (err)` 只为改状态码。
+ */
 @Injectable()
 export class UserService {
   constructor(
@@ -71,10 +77,10 @@ export class UserService {
   /**
    * 跨用户操作的前置判定：**只看权限码，不看角色**。
    *
-   * 这里原先写的是 `isSystemActor(actor) || isAdmin(actor)` —— 那等于把"能不能动别人的资源"
-   * 绑死在 admin 这一个角色上：将来要加一个"能删用户但不能重置密码"的角色，只能改业务代码。
-   * 稳定的语义是权限码（`user:delete` / `user:restore` / `user:reset-password`），
-   * 角色只是权限码的载体 —— 授权关系在数据库里改，业务代码不动。
+   * 判据必须是权限码（`user:delete` / `user:restore` / `user:reset-password`），
+   * 不能是角色：把"能不能动别人的资源"绑死在 admin 上，将来要加一个"能删用户但不能
+   * 重置密码"的角色就只能改业务代码。角色只是权限码的载体 —— 授权关系在数据库里改，
+   * 业务代码不动。
    *
    * 系统身份（`systemActor`）直接放行：它不持有任何角色，按 §17 的约定 `ownsResource` 恒为真。
    * 通配码 `*` 与其它码同等处理，与路由守卫的判定保持一致。
@@ -91,30 +97,28 @@ export class UserService {
   /** 创建用户（哈希在 DB 操作之前计算，不占用连接） */
   async create(dto: CreateUserDto): Promise<UserResponse> {
     const passwordHash = await hashPassword(dto.password);
-    try {
-      // 建用户 + 建角色绑定：同一事务。分开写会出现"用户已存在但没有任何角色"
-      // 的窗口，而这种用户在认证侧的角色集合为空 —— 等于建了一个不能登录的账号
-      const user = await this.database.transaction(async (tx) => {
-        const [created] = await tx
-          .insert(users)
-          .values({
-            studentNo: dto.studentNo,
-            email: dto.email,
-            nickname: dto.nickname,
-            passwordHash,
-            points: dto.points,
-          })
-          .returning(userPublicColumns);
+    // 建用户 + 建角色绑定：同一事务。分开写会出现"用户已存在但没有任何角色"
+    // 的窗口，而这种用户在认证侧的角色集合为空 —— 等于建了一个不能登录的账号
+    const user = await this.database.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(users)
+        .values({
+          studentNo: dto.studentNo,
+          email: dto.email,
+          nickname: dto.nickname,
+          passwordHash,
+          points: dto.points,
+        })
+        .returning(userPublicColumns);
 
-        await this.grantRoles(tx, created.id, dto.roles, 'user:create');
-        return created;
-      });
-      // 回读一次而不是直接拼 dto.roles：响应里的角色顺序必须与后续 GET 完全一致
-      // （`level` 降序、`code` 升序），拼出来的数组做不到这一点
-      return this.withRoles(user);
-    } catch (err) {
-      this.handlePgError(err);
-    }
+      await this.grantRoles(tx, created.id, dto.roles, 'user:create');
+      return created;
+    });
+    // 回读一次而不是直接拼 dto.roles：响应里的角色顺序必须与后续 GET 完全一致
+    // （`level` 降序、`code` 升序），拼出来的数组做不到这一点。
+    // 唯一约束冲突（23505）由 `common/api-response/error-mapping.ts` 的映射链转 409，
+    // service 不 catch
+    return this.withRoles(user);
   }
 
   /** 分页查询（软删除用户不可见），默认按修改时间降序 */
@@ -255,27 +259,24 @@ export class UserService {
     // roles 不是 users 表的列，剥出来单独走关联表；其余字段照常进 set()
     const { roles: nextRoles, ...scalarPatch } = allowed;
 
-    try {
-      const user = await this.database.transaction(async (tx) => {
-        const [updated] = await tx
-          .update(users)
-          .set({ ...scalarPatch, updatedAt: new Date() })
-          .where(and(eq(users.id, id), isNull(users.deletedAt)))
-          .returning(userPublicColumns);
-        if (!updated) {
-          throw new NotFoundException('用户不存在');
-        }
-        if (nextRoles) {
-          // 角色集合是整体替换：先软删旧绑定再插新的，留痕可查
-          await this.replaceRoles(tx, id, nextRoles as RoleCode[]);
-        }
-        return updated;
-      });
-      // 同 create：角色集合回读，响应顺序与 GET 一致
-      return this.withRoles(user);
-    } catch (err) {
-      this.handlePgError(err);
-    }
+    const user = await this.database.transaction(async (tx) => {
+      const [updated] = await tx
+        .update(users)
+        .set({ ...scalarPatch, updatedAt: new Date() })
+        .where(and(eq(users.id, id), isNull(users.deletedAt)))
+        .returning(userPublicColumns);
+      if (!updated) {
+        throw new NotFoundException('用户不存在');
+      }
+      if (nextRoles) {
+        // 角色集合是整体替换：先软删旧绑定再插新的，留痕可查
+        await this.replaceRoles(tx, id, nextRoles as RoleCode[]);
+      }
+      return updated;
+    });
+    // 同 create：角色集合回读，响应顺序与 GET 一致。
+    // 事务内抛的 NotFoundException 原样上抛，由过滤器转 404
+    return this.withRoles(user);
   }
 
   /**
@@ -312,26 +313,22 @@ export class UserService {
     return this.withRoles(user);
   }
 
-  /** 恢复软删除用户（email 可能与现存用户冲突而 409）；归属规则同 `softDelete` */
+  /** 恢复软删除用户（email 可能与现存用户冲突，由全局映射链转 409）；归属规则同 `softDelete` */
   async restore(actor: Actor, id: number): Promise<UserResponse> {
     if (!(await this.mayActOnOthers(actor, 'user:restore'))) {
       assertOwnership(actor, id, '只能恢复自己的账号');
     }
-    try {
-      const now = new Date();
-      const [user] = await this.db
-        .update(users)
-        .set({ deletedAt: null, updatedAt: now })
-        // isNotNull 保证只恢复已删除的用户
-        .where(and(eq(users.id, id), isNotNull(users.deletedAt)))
-        .returning(userPublicColumns);
-      if (!user) {
-        throw new NotFoundException('用户不存在或未删除');
-      }
-      return this.withRoles(user);
-    } catch (err) {
-      this.handlePgError(err);
+    const now = new Date();
+    const [user] = await this.db
+      .update(users)
+      .set({ deletedAt: null, updatedAt: now })
+      // isNotNull 保证只恢复已删除的用户
+      .where(and(eq(users.id, id), isNotNull(users.deletedAt)))
+      .returning(userPublicColumns);
+    if (!user) {
+      throw new NotFoundException('用户不存在或未删除');
     }
+    return this.withRoles(user);
   }
 
   /**
@@ -496,30 +493,6 @@ export class UserService {
       .set({ deletedAt: now, updatedAt: now })
       .where(and(eq(userRoles.userId, userId), isNull(userRoles.deletedAt)));
     await this.grantRoles(tx, userId, codes, 'user:update');
-  }
-
-  /**
-   * 把 PG 唯一约束冲突（23505）转换为中文 409。
-   *
-   * drizzle 会把 pg 驱动错误包装为 DrizzleQueryError，原始错误在 `cause` 上，
-   * 必须先解包再读 code / constraint。
-   */
-  private handlePgError(err: unknown): never {
-    const cause = (err as { cause?: unknown })?.cause ?? err;
-    const { code, constraint } = cause as {
-      code?: string;
-      constraint?: string;
-    };
-    if (code === '23505') {
-      if (constraint?.includes('student_no')) {
-        throw new ConflictException('学号已存在');
-      }
-      if (constraint?.includes('email_alive_idx')) {
-        throw new ConflictException('邮箱已被使用');
-      }
-      throw new ConflictException('数据唯一性冲突');
-    }
-    throw err;
   }
 }
 

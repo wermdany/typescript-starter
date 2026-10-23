@@ -28,7 +28,6 @@ export type AuthUser = Pick<Users, keyof typeof authUserColumns>;
  * 只含前端登录后立即可用的身份字段；**不含** `points` / `createdAt` 等资料字段
  * （需要完整资料时走 `GET /users/:id`），也**不含** `passwordHash`。
  *
- * `role`（单数）已改为 `roles`（多角色），这是一次**破坏性契约变更**：
  * 角色来自 `user_roles` 关联表，顺序按 `roles.level` 降序。
  */
 export interface UserSummary {

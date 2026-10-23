@@ -12,7 +12,7 @@ import { TokenModule } from './token/token.module.js';
  * 只需要"会话服务 / 认证中间件"这类基础能力，不该 import 整个 `AuthModule`
  * （那会连带登录用例与 Controller）。
  *
- * 整体转发 SessionModule：它自己 export 的 `SessionService` / `SessionAuthHandler`
+ * 整体转发 SessionModule：它自己 export 的 `SessionService` / `SessionAuthenticator`
  * 经由这里对全局可见；本模块不复制任何 provider 声明，避免两处清单漂移。
  * （TokenModule / LoginModule 只服务认证内部链路，不对外。）
  */

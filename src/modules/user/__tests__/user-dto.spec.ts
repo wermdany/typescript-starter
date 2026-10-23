@@ -1,7 +1,7 @@
 import type { ArgumentMetadata } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
 
-import { ZodValidationPipe } from '@/shared/http/zod-validation.pipe.js';
+import { createZodValidationPipe } from '@/common/validation/zod-validation.pipe.js';
 import { changePasswordSchema } from '../dto/change-password.dto.js';
 import { createUserSchema } from '../dto/create-user.dto.js';
 import { idParamSchema, studentNoParamSchema } from '../dto/params.dto.js';
@@ -238,7 +238,7 @@ describe('updateUserSchema：严格三态（省略 / 空值 / null）', () => {
   });
 
   it('经管道后显式 null 仍是类型错误（body 不做空值归一化）', () => {
-    const pipe = new ZodValidationPipe(updateUserSchema);
+    const pipe = createZodValidationPipe(updateUserSchema);
     try {
       pipe.transform({ nickname: null }, { type: 'body' });
       throw new Error('应当抛出 BadRequestException');
@@ -265,7 +265,7 @@ describe('updateUserSchema：严格三态（省略 / 空值 / null）', () => {
 });
 
 describe('queryUsersSchema：schema 自身严格，宽容由 query 管道提供', () => {
-  const queryPipe = new ZodValidationPipe(queryUsersSchema);
+  const queryPipe = createZodValidationPipe(queryUsersSchema);
 
   it('空查询 → 第一页 / 10 条 / 修改时间倒序', () => {
     expect(queryPipe.transform({}, QUERY)).toEqual({
@@ -391,7 +391,7 @@ describe('idParamSchema：:id 路径参数（纯数字字符串 → number）', 
   });
 
   it('经管道后失败形态符合契约：message 固定 + errors 数组', () => {
-    const pipe = new ZodValidationPipe(idParamSchema);
+    const pipe = createZodValidationPipe(idParamSchema);
     try {
       pipe.transform('abc');
       throw new Error('应当抛出 BadRequestException');
@@ -409,7 +409,7 @@ describe('idParamSchema：:id 路径参数（纯数字字符串 → number）', 
   });
 
   it('经管道后空白值同样被拒绝（param 不在 query 宽容范围内）', () => {
-    const pipe = new ZodValidationPipe(idParamSchema);
+    const pipe = createZodValidationPipe(idParamSchema);
     try {
       pipe.transform('   ');
       throw new Error('应当抛出 BadRequestException');

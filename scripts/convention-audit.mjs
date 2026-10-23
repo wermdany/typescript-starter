@@ -51,6 +51,18 @@ const FORBIDDEN_FILE_SUFFIX_RE = /\.(use-case|projection|handler|policy)\.ts$/;
 const FORBIDDEN_BARE_NAMES = new Set(['projection.ts', 'use-case.ts', 'handler.ts', 'policy.ts']);
 
 /**
+ * 注释里的"历史脉络"标记（§2 #18）。
+ *
+ * 只收高精度词，宁可漏判也不误报：`不再` / `已删除` 这类词在描述当前语义与
+ * 软删除状态时同样正常（"用户已删除"是领域词），不能当演进叙述处理。
+ */
+const COMMENT_HISTORY_RE =
+  /重构前|重构后|改造前|改造后|多键时代|旧实现|旧版本|以前是|原来是|原先的|原先写|之前是|之前写|之前的实现|已废弃|已改名为|已移除|本轮改|上一版/;
+
+/** 注释行：`//` 行、块注释续行 `*`、块注释起始 `/*` */
+const COMMENT_LINE_RE = /^\s*(?:\/\/|\*|\/\*)/;
+
+/**
  * `isAdmin()` 的合法使用处：契约定义（`common/`）、守卫与 barrel（`shared/`）、
  * 权限码解析器（`modules/rbac/`）。业务模块里出现即视为"用角色代替权限码做分支"。
  */
@@ -133,6 +145,11 @@ const RULE_META = {
     section: '§16 §18',
     title: '业务代码不用 isAdmin() 决定"能否操作别人的资源"',
     suggest: '准入问权限码（`user:delete` / `user:restore` / `user:reset-password`），角色只是权限码的载体',
+  },
+  'comment-history': {
+    section: '§2 #18',
+    title: '注释不写功能的历史脉络',
+    suggest: '只写"当前怎么设计、为什么必须这样"；"重构前/原先/已废弃/本轮"这类演进叙述删掉 —— git 已经记了历史，注释只对读代码当刻的人负责',
   },
 };
 
@@ -415,6 +432,24 @@ function collectTextFindings(sourceText, file, options, findings) {
   const omitRe = /\bOmit\s*<[^>]*(passwordHash|password_hash|tokenHash|refreshTokenHash)/;
   findRegexMatches(lines, omitRe, (lineNumber, matched) => {
     addFinding(findings, options, 'projection-blacklist', file, lineNumber, `黑名单投影：${matched.trim()}`);
+  });
+
+  // 注释不写功能的历史脉络（§2 #18）：git 已记录演进过程，注释只对读代码当刻负责
+  lines.forEach((line, index) => {
+    if (!COMMENT_LINE_RE.test(line)) {
+      return;
+    }
+    if (!COMMENT_HISTORY_RE.test(line)) {
+      return;
+    }
+    addFinding(
+      findings,
+      options,
+      'comment-history',
+      file,
+      index + 1,
+      `注释写功能历史脉络：${line.trim().slice(0, 60)}`,
+    );
   });
 
   if (!isExempt(file, CONFIG_RULE_EXEMPT_PREFIXES)) {

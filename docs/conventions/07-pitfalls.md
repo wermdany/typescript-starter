@@ -27,15 +27,22 @@
 - **`z.coerce.boolean()` 会把 `'false'` 判成 `true`** → 用 `envBoolean()`（第 4 节）
 - **zod v4 的 transform 里 `throw` 不被 `safeParse` 接住** → 用 `z.enum` 报 issue
 - **body parser 早于 `NestModule.configure()`**：trace/access 中间件要覆盖
-  malformed JSON / 无路由 404，必须在 `createApp()`（`server.ts`）里 `app.use()` 即时挂载；
-  放进某个 Module 的 `configure()` 会排在 jsonParser 之后（实测层序），
+  malformed JSON / 无路由 404，必须走 `common/http-stages.ts` 的 `registerRequestStages()`
+  （`server.ts` 的 `createApp()` 里 `app.use()` 即时挂载）；
+  放进某个 Module 的 `configure()` 或 providers 会排在 jsonParser 之后（实测层序），
   malformed JSON 的 400 就没有 traceId —— 不要尝试把请求中间件搬进模块
 - **`source-map-support` 不再使用**：改用 Node 原生 `--enable-source-maps`，不要 import 它
 - **异常日志用单个字符串**：第二个字符串参数会被当成 context
 - **排查 500 先看 `caused by:`**：只有外层 `Failed query: ...` 说明根因没展开
 - **多行 message 会劈开日志行**：单行日志必须过 `toSingleLine()`
 - **pg `Pool` 没有 `error` 监听器会杀掉进程** → 见第 8 节
-- **access 日志在中间件层**：删掉 `app.use(accessLogMiddleware)` 会让所有访问行无声消失
+- **access 日志在中间件层**：删掉 `registerRequestStages()` 里的 `accessLogMiddleware`
+  会让所有访问行无声消失
+- **拦截器顺序由数组字面量决定**：`HTTP_STAGE_PROVIDERS` 的顺序不是"写好看"，
+  Body 日志必须在幂等之前、幂等必须在 Transform 之前 —— 调换会让"重放请求没有 body 行"
+  或"快照被二次包装"
+- **幂等快照只存 `{ status, body }`**：不存响应头 / Cookie；因此 `/auth/login`、
+  `/auth/refresh` **不要**标 `@Idempotent()`（重放会返回没有 Set-Cookie 的成功体）
 - **收尾回调里必须 `runWithTraceId` 恢复上下文**：客户端中断时 `close` 由 socket 触发，
   上下文已丢失，不恢复会丢 traceId
 - **access 行耗时**从中间件入口算到响应收尾，含 body 解析 / 守卫 / 校验 / 序列化

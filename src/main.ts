@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { zhCN } from 'zod/locales';
 
 import { loadEnv } from '@/config/env.js';
-import { formatError } from '@/logger/error-format.js';
+import { formatError } from '@/common/logging/error-format.js';
 import { FileLogger } from '@/logger/file-logger.js';
 import { getLogLevels } from '@/logger/log-levels.js';
 import { createApp } from './server.js';

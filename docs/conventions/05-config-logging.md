@@ -97,31 +97,35 @@
 
 ### 请求与访问日志
 
-1. `traceContextMiddleware`、`accessLogMiddleware` 都在 `server.ts` 的 `createApp()` 里 `app.use()`，且早于 `listen()`。
+1. `traceContextMiddleware`、`accessLogMiddleware` 都由 `server.ts` 的 `createApp()` 调
+   `common/http-stages.ts` 的 `registerRequestStages()` 即时挂载，且早于 `listen()`。
    `app.use()` 是即时挂载，只有早注册才能排在 body parser 之前，
    malformed JSON 的 400 / 未命中路由的 404 也才有 traceId 与 access 行。顺序不可换：
    access 必须在 trace 之后（入口要取 traceId）
 2. `accessLogMiddleware` —— 访问行唯一出口，一个请求恰好一行
    `METHOD /path status 耗时ms [失败: 原因]`，级别 ≥500 `error` / ≥400 `warn` / 其余 `log`；
    `finish` + `close` 双监听 + 单次守卫防重复；客户端中断时追加 `(连接已中断)` 并提到 `warn`
-3. `HttpExceptionFilter` —— 只记 5xx（`error`，带堆栈 / cause 链）；4xx 不记（access 行已留痕）。
+3. `HttpExceptionFilter`（`common/api-response/exception.filter.ts`）—— 只记 5xx（`error`，带堆栈 / cause 链）；
+   4xx 不记（access 行已留痕）。异常先过 `common/api-response/error-mapping.ts` 的映射链
+   （`HttpException` 直通 → PG 23505 → 409），映射不到才落 500。
    两类都把结构化摘要写进 `res.locals.accessLogFailure`（`{ summary, fields? }`），
    由日志层拼成「失败: …（字段错误：a, b）」，最多列 3 个字段
-4. `RequestLoggingInterceptor` —— 只负责 `LOG_BODY` 的 body 行（body 只在拦截器里读得到），
-   不统计耗时、不记访问行。拦截器与过滤器会看到同一个异常，不要在拦截器里重复记失败
-5. `registerProcessErrorHandlers()` —— `uncaughtException` / `unhandledRejection` 记 fatal 后 `exit(1)`，
-   必须在 logger 接管之后注册
+4. `RequestLoggingInterceptor`（`common/logging/request-logging.interceptor.ts`）—— 只负责
+   `LOG_BODY` 的 body 行（body 只在拦截器里读得到），不统计耗时、不记访问行。
+   拦截器与过滤器会看到同一个异常，不要在拦截器里重复记失败
+5. `registerProcessErrorHandlers()`（`logger/process-error.ts`）—— `uncaughtException` /
+   `unhandledRejection` 记 fatal 后 `exit(1)`，必须在 logger 接管之后注册
 
 ### `LOG_BODY`
 
 - `LOG_BODY=true` 时输出 `${method} ${url} body: {...}`（`log` 级别），默认关闭
-- 经 `logger/sanitize.ts` 脱敏：敏感字段整值替换为 `***`，超长字符串/数组/对象/深度/整行都有上限
+- 经 `common/logging/sanitize.ts` 脱敏：敏感字段整值替换为 `***`，超长字符串/数组/对象/深度/整行都有上限
 - body 为空（`{}` / `null` / 空白串）时不产生该行
 - body 行独立成行，不并入 access 行
 
 ### `formatError`
 
-- `logger/error-format.ts` 的 `formatError()` 逐层展开 `error.cause`（最多 5 层，前缀 `caused by:`，
+- `common/logging/error-format.ts` 的 `formatError()` 逐层展开 `error.cause`（最多 5 层，前缀 `caused by:`，
   带循环引用保护），并摘出 `code` / `severity` / `detail` / `constraint` / `errno` 等字段
 - drizzle 的外层 message 只有 SQL 文本，真实原因在 `cause` 里；只看外层会丢掉根因
 - 首层错误保持简写（无堆栈时只取 `message`）；cause 链上的库错误取 `Name: message`

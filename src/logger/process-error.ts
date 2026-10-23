@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 
-import { formatError } from './error-format.js';
+import { formatError } from '@/common/logging/error-format.js';
 
 /**
  * 进程级异常兜底。

@@ -2,7 +2,7 @@ import { ConsoleLogger, type LogLevel } from '@nestjs/common';
 import { closeSync, mkdirSync, openSync, writeSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-import { getTraceId } from './trace.js';
+import { getTraceId } from '@/common/context/trace.js';
 
 /** 移除 ANSI 转义序列（颜色码），文件内容保持纯文本 */
 function stripAnsi(text: string): string {

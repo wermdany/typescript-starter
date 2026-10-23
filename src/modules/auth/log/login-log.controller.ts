@@ -1,13 +1,12 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get } from '@nestjs/common';
 
-import { type PageResponse } from '@/shared/common.js';
-import { ZodValidationPipe } from '@/shared/http/zod-validation.pipe.js';
 import {
   Authenticated,
   CurrentUser,
   RequirePermission,
   type AuthenticatedUser,
-} from '@/shared/auth.js';
+} from '@/common/auth/access.decorator.js';
+import { ZodParam, ZodQuery } from '@/common/validation/param.decorator.js';
 import {
   querySessionsSchema,
   type QuerySessionsDto,
@@ -16,6 +15,7 @@ import {
   userIdParamSchema,
   type UserIdParam,
 } from '@/modules/auth/session/dto/session-params.dto.js';
+import { type PageResponse } from '@/shared/common.js';
 import type { LoginLogResponse } from './dto/login-log.dto.js';
 import { LoginLogService } from './login-log.service.js';
 
@@ -23,6 +23,9 @@ import { LoginLogService } from './login-log.service.js';
  * 登录记录接口（**找 login-logs 的接口来这个文件**）。
  *
  * 只增不改的审计流水：本人视角 `/auth/login-logs`，管理员视角 `/users/:id/login-logs`。
+ *
+ * 两个路由的分页参数复用 `querySessionsSchema`（同为 `page` / `pageSize`），
+ * 校验走 `@ZodQuery` / `@ZodParam`。
  */
 @Controller()
 export class LoginLogController {
@@ -33,7 +36,7 @@ export class LoginLogController {
   @Get('auth/login-logs')
   listMyLoginLogs(
     @CurrentUser() user: AuthenticatedUser,
-    @Query(new ZodValidationPipe(querySessionsSchema)) query: QuerySessionsDto,
+    @ZodQuery(querySessionsSchema) query: QuerySessionsDto,
   ): Promise<PageResponse<LoginLogResponse>> {
     return this.loginLogs.listForUser(user.id, query.page, query.pageSize);
   }
@@ -42,8 +45,8 @@ export class LoginLogController {
   @RequirePermission('login-log:read')
   @Get('users/:id/login-logs')
   adminListUserLoginLogs(
-    @Param('id', new ZodValidationPipe(userIdParamSchema)) userId: UserIdParam,
-    @Query(new ZodValidationPipe(querySessionsSchema)) query: QuerySessionsDto,
+    @ZodParam('id', userIdParamSchema) userId: UserIdParam,
+    @ZodQuery(querySessionsSchema) query: QuerySessionsDto,
   ): Promise<PageResponse<LoginLogResponse>> {
     return this.loginLogs.listForUser(userId, query.page, query.pageSize);
   }

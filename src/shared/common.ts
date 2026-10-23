@@ -4,26 +4,20 @@
  * 业务代码按需从本文件取常用件，不必记住具体文件名：
  *
  * ```ts
- * import { ApiMessage, paginate, PageResponse, hashPassword } from './common.js';
- * import { trimmedShape, passwordSchema, paginationSchema } from './validation.js';
+ * import { paginate, type PageResponse, hashPassword } from '@/shared/common.js';
+ * import { trimmedShape, passwordSchema, paginationSchema } from '@/shared/validation.js';
  * ```
  *
+ * **这里只放纯工具**（分页、密码哈希、校验）：它们不依赖 Nest，也不参与
+ * "一次请求经过哪些阶段"的回答。横切能力（响应装饰器、过滤器、拦截器、管道）
+ * 一律在 `@/common/<功能>/`，清单见 `common/http-stages.ts`。
+ *
  * - 校验相关（zod）在 `validation.ts`，单独拆开是为了让 import 一眼看出来源
- * - 全局 HTTP 组件（过滤器/拦截器/校验管道）不放这里：它们只由 `app.core.module.ts` 与
- *   Controller 使用，直接从 `@/shared/http/*` 引入
+ * - 响应装饰器（`@ApiMessage` / `@SkipTransform`）在
+ *   `@/common/api-response/response.decorator.js`（它们服务于契约产物，跟着契约走）
  */
 
-// 响应装饰器
-export {
-  ApiMessage,
-  RESPONSE_MESSAGE_KEY,
-} from '@/shared/decorators/api-message.decorator.js';
-export {
-  SkipTransform,
-  SKIP_TRANSFORM_KEY,
-} from '@/shared/decorators/skip-transform.decorator.js';
-
-// 响应契约
+// 响应契约（类型 + 默认文案常量）
 export {
   DEFAULT_SUCCESS_MESSAGE,
   DEFAULT_VALIDATION_MESSAGE,

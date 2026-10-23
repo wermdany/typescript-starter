@@ -42,13 +42,14 @@
 | 8 | `timestamps()` 必须调用展开 | `...timestamps` | `...timestamps()` | 同上 |
 | 9 | 日志走 `Logger` | `console.log` | `new Logger('Context')` | 同上 |
 | 10 | Controller 不手写响应 | `res.json(...)` | 抛 `HttpException` 子类 | 同上 |
-| 11 | 每条路由显式声明访问意图 | 裸奔的路由 | `@Public()` / `@Authenticated()` / `@RequirePermission()` / `@OwnerOrPermission()` | `pnpm perm:audit` |
+| 11 | 每条路由显式声明访问意图 | 裸奔的路由 | `@Public()` / `@Authenticated()` / `@RequirePermission()` / `@OwnerOrPermission()`（统一从 `@/common/auth/access.decorator.js` 取） | `pnpm perm:audit` |
 | 12 | 面向用户资源的写方法首参是 `actor` | `softDelete(id)` | `softDelete(actor, id)` | TypeScript（R1）+ 人工 review |
 | 13 | 一次请求多次写必须包事务 | 两次独立写 | `database.transaction()` | 人工 review |
-| 14 | 唯一冲突转 409 前先解包 `err.cause` | 读 `err.code` | 解包 `DrizzleQueryError` | 人工 review |
+| 14 | PG 唯一冲突只在 `common/api-response/pg-error.ts` 解包，service 里禁止手写 `23505` | `if (err.code === '23505')` | `unwrapPgError(err)` + `error-mapping.ts` 的映射链 | 人工 review |
 | 15 | `success === (状态码 2xx)` | 200 + `success:false` | 失败走过滤器 | 测试 + 人工 review |
 | 16 | `envSchema` 与 `.env.example` 一一对应 | 只改一处 | 两边同步 | `env-example-sync` 规则 |
 | 17 | 跨用户操作的准入问**权限码**，不问角色 | `isAdmin(actor)` 分支 | `mayActOnOthers(actor, 'user:delete')` | `admin-role-branch` 规则 |
+| 18 | 注释只写**当前设计与其理由**，不写功能的历史脉络 | `// 重构前是 X，现在改成 Y` / `// 这里原先写的是 …` / `// 已废弃` | `// 守卫不查库：身份由认证中间件写入` / `// 必须单事务：拆成多次往返会有竞态` | `comment-history` 规则 |
 
 ---
 
@@ -57,6 +58,7 @@
 | 你要改的东西 | 读这一份 | 必跑 |
 | --- | --- | --- |
 | 目录结构、模块分包、新增模块 | `docs/conventions/01-architecture.md` | `pnpm typecheck` |
+| 加/改系统级横切能力（守卫 / 拦截器 / 过滤器 / 中间件 / 中间件顺序） | `src/common/<功能>/` + `common/http-stages.ts` | `pnpm verify` |
 | controller、DTO、响应字段、分页 | `docs/conventions/02-request-response.md` | `pnpm verify` + curl |
 | 建表、改列、查询、事务 | `docs/conventions/03-database-schema.md` | `pnpm db:generate`（人工看 SQL） |
 | 权限、角色、归属、service 写方法 | `docs/conventions/04-auth.md` | `pnpm perm:audit` |

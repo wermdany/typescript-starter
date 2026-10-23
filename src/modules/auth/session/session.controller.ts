@@ -1,30 +1,33 @@
 import {
-  Body,
   Controller,
   Delete,
   Get,
   HttpCode,
   HttpStatus,
   Inject,
-  Param,
   Post,
-  Query,
   Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
 
-import { ApiMessage, type PageResponse } from '@/shared/common.js';
-import { ZodValidationPipe } from '@/shared/http/zod-validation.pipe.js';
+import { ApiMessage } from '@/common/api-response/response.decorator.js';
 import {
   Authenticated,
   CurrentUser,
   RequirePermission,
   type AuthenticatedUser,
-} from '@/shared/auth.js';
+} from '@/common/auth/access.decorator.js';
+import {
+  ZodBody,
+  ZodParam,
+  ZodParams,
+  ZodQuery,
+} from '@/common/validation/param.decorator.js';
 import { APP_CONFIG, type AppConfig } from '@/config/app-config.js';
 import { ENV } from '@/config/config.module.js';
 import type { Env } from '@/config/env.js';
 import { clearRefreshCookie } from '@/modules/auth/login/refresh-cookie.js';
+import { type PageResponse } from '@/shared/common.js';
 import {
   querySessionsSchema,
   type QuerySessionsDto,
@@ -51,6 +54,9 @@ export type SessionWithCurrent = SessionResponse & { current: boolean };
  * - 管理员视角：`/users/:id/sessions*`（查看 / 踢全部 / 踢单台）
  *
  * 登录态 Cookie 的写入与清除也在这些端点上（踢掉当前设备 = 登录态终结）。
+ *
+ * 参数校验统一走 `@ZodBody` / `@ZodQuery` / `@ZodParam` / `@ZodParams`，
+ * schema 与来源一次绑定，调用点不出现管道构造。
  */
 @Controller()
 export class SessionController {
@@ -69,7 +75,7 @@ export class SessionController {
   @HttpCode(HttpStatus.OK)
   async revokeAll(
     @CurrentUser() user: AuthenticatedUser,
-    @Body(new ZodValidationPipe(revokeAllSchema)) dto: RevokeAllDto,
+    @ZodBody(revokeAllSchema) dto: RevokeAllDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<RevokeAllResult> {
     const result = await this.sessions.revokeAllMine(user, dto);
@@ -84,8 +90,7 @@ export class SessionController {
   @Get('auth/sessions')
   listMySessions(
     @CurrentUser() user: AuthenticatedUser,
-    @Query(new ZodValidationPipe(querySessionsSchema))
-    query: QuerySessionsDto,
+    @ZodQuery(querySessionsSchema) query: QuerySessionsDto,
   ): Promise<PageResponse<SessionWithCurrent>> {
     return this.sessions.listMine(user, query);
   }
@@ -97,8 +102,7 @@ export class SessionController {
   @HttpCode(HttpStatus.OK)
   async revokeMySession(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id', new ZodValidationPipe(sessionIdParamSchema))
-    sessionId: SessionIdParam,
+    @ZodParam('id', sessionIdParamSchema) sessionId: SessionIdParam,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
     await this.sessions.revokeMine(user, sessionId);
@@ -115,7 +119,7 @@ export class SessionController {
   @Delete('users/sessions/:id')
   @HttpCode(HttpStatus.OK)
   adminRevokeUserSessions(
-    @Param('id', new ZodValidationPipe(userIdParamSchema)) userId: UserIdParam,
+    @ZodParam('id', userIdParamSchema) userId: UserIdParam,
   ): Promise<{ revoked: number }> {
     return this.sessions.revokeUserSessions(userId);
   }
@@ -125,9 +129,8 @@ export class SessionController {
   @Get('users/:id/sessions')
   adminListUserSessions(
     @CurrentUser() operator: AuthenticatedUser,
-    @Param('id', new ZodValidationPipe(userIdParamSchema)) userId: UserIdParam,
-    @Query(new ZodValidationPipe(querySessionsSchema))
-    query: QuerySessionsDto,
+    @ZodParam('id', userIdParamSchema) userId: UserIdParam,
+    @ZodQuery(querySessionsSchema) query: QuerySessionsDto,
   ): Promise<PageResponse<SessionWithCurrent>> {
     return this.sessions.listForUser(userId, operator.sessionId, query);
   }
@@ -138,8 +141,7 @@ export class SessionController {
   @Delete('users/:id/sessions/:sessionId')
   @HttpCode(HttpStatus.OK)
   adminRevokeUserSession(
-    @Param(new ZodValidationPipe(userSessionParamsSchema))
-    params: UserSessionParams,
+    @ZodParams(userSessionParamsSchema) params: UserSessionParams,
   ): Promise<void> {
     return this.sessions.revokeUserSession(params.id, params.sessionId);
   }

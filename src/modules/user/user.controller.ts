@@ -1,18 +1,14 @@
 import {
-  Body,
   Controller,
   Delete,
   Get,
   HttpCode,
   HttpStatus,
-  Param,
   Patch,
   Post,
-  Query,
 } from '@nestjs/common';
 
-import { ApiMessage, type PageResponse } from '@/shared/common.js';
-import { ZodValidationPipe } from '@/shared/http/zod-validation.pipe.js';
+import { ApiMessage } from '@/common/api-response/response.decorator.js';
 import {
   Authenticated,
   CurrentUser,
@@ -20,7 +16,10 @@ import {
   Public,
   RequirePermission,
   type AuthenticatedUser,
-} from '@/shared/auth.js';
+} from '@/common/auth/access.decorator.js';
+import { Idempotent } from '@/common/idempotency/idempotency.decorator.js';
+import { ZodBody, ZodParam, ZodQuery } from '@/common/validation/param.decorator.js';
+import { type PageResponse } from '@/shared/common.js';
 import {
   changePasswordSchema,
   type ChangePasswordDto,
@@ -45,6 +44,12 @@ import { UserService } from './user.service.js';
  * `PATCH /users/:id` 用 `@OwnerOrPermission('id', 'user:update')`：
  * 本人改自己无需权限码，管理员改别人需要 `user:update`。
  *
+ * 参数校验全部走 `@ZodBody` / `@ZodQuery` / `@ZodParam`（`common/validation/param.decorator.ts`）：
+ * schema 与来源一次绑定，调用点不出现管道构造。
+ *
+ * 幂等：`POST /users` 与 `POST /users/restore/:id` 支持 `Idempotency-Key`
+ * 重放（`@Idempotent()` + 请求头双条件生效），避免网络重试建出两个用户。
+ *
  * 静态段路由（health、me、by-student-no）必须声明在 `:id` 路由之前。
  */
 @Controller('users')
@@ -65,13 +70,12 @@ export class UserController {
     return this.userService.findMe(user.id);
   }
 
-  /** 创建用户 */
+  /** 创建用户（支持 `Idempotency-Key` 重放：重复提交不会建出两个账号） */
   @RequirePermission('user:create')
+  @Idempotent()
   @ApiMessage('创建成功')
   @Post()
-  create(
-    @Body(new ZodValidationPipe(createUserSchema)) dto: CreateUserDto,
-  ): Promise<UserResponse> {
+  create(@ZodBody(createUserSchema) dto: CreateUserDto): Promise<UserResponse> {
     return this.userService.create(dto);
   }
 
@@ -79,7 +83,7 @@ export class UserController {
   @RequirePermission('user:read')
   @Get()
   findAll(
-    @Query(new ZodValidationPipe(queryUsersSchema)) query: QueryUsersDto,
+    @ZodQuery(queryUsersSchema) query: QueryUsersDto,
   ): Promise<PageResponse<UserResponse>> {
     return this.userService.findAll(query);
   }
@@ -88,8 +92,7 @@ export class UserController {
   @RequirePermission('user:read')
   @Get('by-student-no/:studentNo')
   findByStudentNo(
-    @Param('studentNo', new ZodValidationPipe(studentNoParamSchema))
-    studentNo: StudentNoParam,
+    @ZodParam('studentNo', studentNoParamSchema) studentNo: StudentNoParam,
   ): Promise<UserResponse> {
     return this.userService.findByStudentNo(studentNo);
   }
@@ -97,9 +100,7 @@ export class UserController {
   /** 按 ID 查询用户详情（管理视角：任意登录用户不可窥探他人资料） */
   @RequirePermission('user:read')
   @Get(':id')
-  findOne(
-    @Param('id', new ZodValidationPipe(idParamSchema)) id: IdParam,
-  ): Promise<UserResponse> {
+  findOne(@ZodParam('id', idParamSchema) id: IdParam): Promise<UserResponse> {
     return this.userService.findOne(id);
   }
 
@@ -113,8 +114,8 @@ export class UserController {
   @Patch(':id')
   update(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id', new ZodValidationPipe(idParamSchema)) id: IdParam,
-    @Body(new ZodValidationPipe(updateUserSchema)) dto: UpdateUserDto,
+    @ZodParam('id', idParamSchema) id: IdParam,
+    @ZodBody(updateUserSchema) dto: UpdateUserDto,
   ): Promise<UserResponse> {
     return this.userService.update(user, id, dto);
   }
@@ -125,7 +126,7 @@ export class UserController {
   @Patch('password')
   changeMyPassword(
     @CurrentUser() user: AuthenticatedUser,
-    @Body(new ZodValidationPipe(changePasswordSchema)) dto: ChangePasswordDto,
+    @ZodBody(changePasswordSchema) dto: ChangePasswordDto,
   ): Promise<void> {
     return this.userService.changePassword(user, user.id, dto, user.sessionId);
   }
@@ -136,19 +137,20 @@ export class UserController {
   @Patch('password/:id')
   changePassword(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id', new ZodValidationPipe(idParamSchema)) id: IdParam,
-    @Body(new ZodValidationPipe(changePasswordSchema)) dto: ChangePasswordDto,
+    @ZodParam('id', idParamSchema) id: IdParam,
+    @ZodBody(changePasswordSchema) dto: ChangePasswordDto,
   ): Promise<void> {
     return this.userService.changePassword(user, id, dto);
   }
 
-  /** 恢复软删除用户 */
+  /** 恢复软删除用户（支持 `Idempotency-Key` 重放） */
   @RequirePermission('user:restore')
+  @Idempotent()
   @ApiMessage('恢复成功')
   @Post('restore/:id')
   restore(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id', new ZodValidationPipe(idParamSchema)) id: IdParam,
+    @ZodParam('id', idParamSchema) id: IdParam,
   ): Promise<UserResponse> {
     return this.userService.restore(user, id);
   }
@@ -160,7 +162,7 @@ export class UserController {
   @HttpCode(HttpStatus.OK)
   softDelete(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id', new ZodValidationPipe(idParamSchema)) id: IdParam,
+    @ZodParam('id', idParamSchema) id: IdParam,
   ): Promise<UserResponse> {
     return this.userService.softDelete(user, id);
   }

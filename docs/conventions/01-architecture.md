@@ -10,49 +10,68 @@
 ```
 src/
 ├── main.ts                       # 入口：loadEnv + FileLogger + createApp + listen + 启动日志
-├── server.ts                     # createApp()：创建应用、注册中间件，不监听端口（测试复用）
-├── app.module.ts                 # 根模块：ConfigProviderModule / AppCoreModule / DatabaseModule / 业务模块
-├── app.core.module.ts            # 全局组件的"目录清单"：import 各功能域的自注册模块
+├── server.ts                     # createApp()：创建应用 + registerRequestStages()（P1 中间件），不监听端口
+├── app.module.ts                 # 根模块：ConfigProviderModule / HttpStagesModule / RbacModule / DatabaseModule / 业务模块
 ├── __tests__/                    # 应用级测试（真实启一个应用，mock 掉数据库）
+├── common/                       # 横切关注点：**按功能划分**，唯一注册处是 http-stages.ts
+│   ├── http-stages.ts            #   HTTP 阶段装配：5 个阶段 + 顺序 + 分层不变式（对账先看这里）
+│   ├── http-stages.module.ts     #   唯一 DI 收口 Module：providers = 阶段注册 + 阶段依赖
+│   ├── auth/                     #   功能：身份与访问
+│   │   ├── auth.contract.ts          身份/角色类型 + 401 403 429 文案（纯契约）
+│   │   ├── permission.contract.ts    PermissionChecker 端口 + PERMISSION_CHECKER token
+│   │   ├── ownership.contract.ts     Actor 联合类型 + 归属纯谓词
+│   │   ├── request-augment.ts        Express.Request.user 的类型增补
+│   │   ├── access.ts                 访问意图（判别联合）+ resolveAccess() 纯判定
+│   │   ├── access.decorator.ts       @Public / @Authenticated / @RequirePermission / @OwnerOrPermission / @CurrentUser
+│   │   └── access.guard.ts           AccessGuard：唯一守卫（登录态 + 权限码 + 归属三层合一）
+│   ├── api-response/             #   功能：响应契约
+│   │   ├── api-response.ts           契约类型 + 默认文案（纯类型）
+│   │   ├── transform.interceptor.ts  返回值 → 成功契约
+│   │   ├── exception.filter.ts       失败唯一出口
+│   │   ├── error-mapping.ts          异常 → HttpException 映射链
+│   │   ├── pg-error.ts               unwrapPgError()：解 drizzle 的 cause 链
+│   │   └── response.decorator.ts     @ApiMessage / @SkipTransform
+│   ├── validation/               #   功能：参数校验
+│   │   ├── zod-validation.pipe.ts    zod 管道（query 空值宽容的唯一通道）
+│   │   └── param.decorator.ts        @ZodBody / @ZodQuery / @ZodParam / @ZodParams
+│   ├── context/                  #   功能：请求上下文（**不得 import @nestjs/common 运行时**）
+│   │   ├── trace.ts                  traceId 的 AsyncLocalStorage
+│   │   └── trace.middleware.ts       P1：解析/生成 traceId + 回写响应头
+│   ├── logging/                  #   功能：日志
+│   │   ├── access-log.middleware.ts  P1：访问行唯一出口
+│   │   ├── request-logging.interceptor.ts  LOG_BODY 的 body 行
+│   │   ├── failure.ts                失败摘要类型 + res.locals 键名
+│   │   ├── error-format.ts           formatError()（展开 cause 链）
+│   │   └── sanitize.ts               body 脱敏与截断
+│   └── idempotency/              #   功能：HTTP 幂等
+│       ├── idempotency.contract.ts   端口 + 键/指纹/结果类型
+│       ├── memory-store.ts           单进程内存实现（换 Postgres 只改 http-stages.ts 一行）
+│       ├── idempotency.interceptor.ts
+│       └── idempotency.decorator.ts  @Idempotent()
 ├── config/
 │   ├── env.ts                    # 环境变量 schema（唯一声明处）+ loadEnv()（带单例缓存）
-│   │                             #   + Env 强类型 / AuthConfig 派生视图（toAuthConfig）
-│   ├── config.module.ts          #   配置统一注入口：ENV / AUTH_CONFIG 两个 @Global provider
+│   ├── app-config.ts             # 业务配置（登录会话/策略 + HTTP 幂等窗口）→ APP_CONFIG provider
+│   ├── config.module.ts          # 配置统一注入口：ENV / APP_CONFIG 两个 @Global provider
 │   └── __tests__/
-├── common/
-│   ├── api-response/api-response.ts  # 响应契约类型 + 默认文案常量（只放类型）
-│   └── auth/                     # 认证契约（纯类型/纯函数，不依赖 Nest 与业务模块）
-│       ├── auth.contract.ts      #   AuthenticatedUser / 认证请求类型 / 401 403 429 文案
-│       └── request-augment.d.ts  #   Express.Request.user 的类型增补
-├── shared/                       # 常用工具：从 barrel 引入，不要记具体文件名
-│   ├── common.ts                 #   @ApiMessage / @SkipTransform / 响应类型 / paginate / 哈希
+├── shared/                       # 纯工具：从 barrel 引入，不要记具体文件名
+│   ├── common.ts                 #   响应契约类型 / paginate / 密码哈希
 │   ├── validation.ts             #   trimmed / trimmedShape / passwordSchema / paginationSchema
-│   ├── decorators/               #   装饰器实现
 │   ├── pagination/               #   paginate() + paginationSchema
 │   ├── validation/               #   trimmed/trimmedShape、passwordSchema（含 __tests__/）
 │   ├── crypto/password.scrypt.ts #   scrypt 哈希/校验
-│   ├── auth/                     #   认证基础件 + 全局守卫的自注册模块
-│   │   ├── auth.module.ts        #     APP_GUARD（HttpAuthGuard）注册；找守卫注册来这里
-│   │   ├── auth.guard.ts         #     AuthGuard（纯逻辑）+ HttpAuthGuard
-│   │   ├── token.ts              #     generateToken / hashToken / 空哈希（假校验对齐耗时）
-│   │   ├── client-info.ts        #     UA → 设备摘要、XFF → 客户端 IP
-│   │   └── decorators/           #     @Public / @Authenticated / @CurrentUser / @RequirePermission / @OwnerOrPermission
-│   └── http/                     #   HTTP 契约 + 自注册模块
-│       ├── http.module.ts        #     APP_FILTER（异常）+ APP_INTERCEPTOR（成功包装）；找契约注册来这里
-│       ├── http-exception.filter.ts
-│       ├── transform.interceptor.ts
-│       └── zod-validation.pipe.ts #    按参数显式注册的管道，不走全局机制
+│   └── auth/                     #   认证纯工具：token / client-info / ownership 断言
 ├── database/                     # @Global 数据库模块
 │   ├── database.module.ts        # DatabaseModule
 │   ├── database.service.ts       # DatabaseService（连接池 + drizzle 实例 + 事务助手）
 │   └── schema/                   # columns.ts（timestamps()）/ index.ts / *.schema.ts
-├── logger/                       # FileLogger、trace、access-log、body 日志、错误格式化、进程级兜底
-│   ├── logger.module.ts          #   APP_INTERCEPTOR（body 日志）；找日志拦截器注册来这里
-│   ├── failure-summary.ts        #   失败摘要的类型与 res.locals 键名（过滤器与访问日志共用）
+├── logger/                       # 只管"日志怎么落盘"：FileLogger、级别、进程级兜底
+│   ├── file-logger.ts            #   ConsoleLogger 子类：控制台 + 文件双写，自动补 [traceId=...]
+│   ├── log-levels.ts             #   最小级别 → logLevels 数组
+│   ├── process-error.ts          #   uncaughtException / unhandledRejection 兜底
 │   └── __tests__/
 ├── startup/local-addresses.ts    # 启动时枚举可访问地址
 └── modules/<domain>/             # 业务模块（当前有 user、auth、rbac）
-                                  #   rbac 是基础设施：权限码解析与缓存、HttpPermissionGuard 注册，不是业务域
+                                  #   rbac 是基础设施：只提供权限码解析（不再是守卫注册处）
     ├── <domain>.module.ts
     ├── <domain>.controller.ts
     ├── <domain>.service.ts       # 或按用例拆成多个 XxxService
@@ -64,6 +83,12 @@ src/
     │   └── <subdomain>.module.ts #   子域只 import 依赖方的 Module，不散引文件
     └── __tests__/                # 测试跟着被测代码所在子域走
 ```
+
+**`common/` 的分包规则是"按功能"，不是按阶段**：`auth/` 是身份与访问、`api-response/`
+是响应契约、`validation/` 是参数校验、`context/` 是请求上下文、`logging/` 是日志、
+`idempotency/` 是 HTTP 幂等。一次请求会穿过多个功能目录，穿过的方式由
+`common/http-stages.ts` 一张表回答 —— 所以**不要**把目录改成 `guards/` `interceptors/`
+`filters/` 这种按技术分层的形式：那会让"加一个功能"变成改 3 个目录。
 
 **模块内分包规则**（以 `modules/auth` 为准）：
 
@@ -103,12 +128,23 @@ kebab-case。禁止自造后缀（`*.use-case.ts` / `*.projection.ts` / `*.handl
 文件名读法 = 目录（域）+ 文件名（职责）：`session/session.service.ts`、
 `login/refresh.service.ts` —— 找代码先找域目录，再看 service/dto/controller。
 
-**全局组件自注册**（对账表见 `app.core.module.ts` 头注释）：每个功能域的
-`*.module.ts` 自带 `APP_GUARD` / `APP_FILTER` / `APP_INTERCEPTOR` 注册——
-"谁提供了什么全局能力"看组件自己的目录，不用去装配模块里对账；
-`app.core.module.ts` 只 import 这些模块，**不直接声明任何 provider**。
-唯一例外：请求中间件（trace/access/cookie/认证）因注册时序必须留在
-`server.ts` 的 `createApp()`（见第 13 节）。
+**全局组件统一注册**（对账表见 `src/common/http-stages.ts` 头注释）：
+守卫 / 拦截器 / 过滤器**不**再由各功能域的自注册模块各自 `APP_*`
+—— 那会让"一次请求经过哪些横切逻辑"分散到 5 个机制、6 个注册点里。
+现在只有一处：
+
+- 清单与顺序：`common/http-stages.ts` 的 `HTTP_STAGE_PROVIDERS`（数组字面量顺序 = 执行顺序）
+- DI 收口：`common/http-stages.module.ts`（`providers: [...HTTP_STAGE_PROVIDERS, ...HTTP_STAGE_DEPENDENCIES]`）
+- 引用：`app.module.ts` 只 import `HttpStagesModule`，**不直接声明任何 provider**
+
+于是"找横切能力看哪里"的答案是唯一的：`common/http-stages.ts`。
+加/改一个系统级横切能力的动作固定为两步 —— 在 `src/common/<功能>/` 写组件、
+在 `HTTP_STAGE_PROVIDERS` 里加一行。
+
+**唯一例外**：请求中间件（trace / access / cookie / 认证）的注册时序特殊，
+必须由 `server.ts` 调 `common/http-stages.ts` 的 `registerRequestStages()`
+即时挂载（见第 13 节与 `07-pitfalls.md`）。它们在同一份 `http-stages.ts` 里有文档与
+入口函数，因此"一个文件看完 5 个阶段"依然成立。
 
 **分层**：Controller 只做路由与参数校验；Service 承载全部业务逻辑（SQL、哈希、异常转换）；
 对外字段由 `dto/` 里的列白名单界定；DTO 用 zod schema 定义并导出 `z.infer` 类型。
@@ -116,9 +152,16 @@ kebab-case。禁止自造后缀（`*.use-case.ts` / `*.projection.ts` / `*.handl
 **依赖方向**（只允许自下而上）：
 
 - `config`、`common`、`shared`：不依赖任何业务代码
-- `logger`：`shared` 不依赖 `logger`；过滤器只依赖 `logger/failure-summary`（纯类型与键名）
+- **`common/**` 的分层不变式**（写死在 `common/http-stages.ts` 头注释，改代码前先读）：
+  - 允许依赖 `@nestjs/*`、express、zod、rxjs 与 Node 内置模块
+  - **禁止** import `@/modules/*`、`@/logger/*`、`@/shared/*`、`@/database/*`
+  - `common/context/*` 更严：**不 import `@nestjs/common` 的运行时** ——
+    `logger/file-logger.ts` 要单向引用它，而 FileLogger 必须先于 DI 容器构造出来
+- `logger`：只依赖 `common/context`（traceId）与 `common/logging/error-format`；
+  `common` 不反向依赖 `logger`（方向单一，否则启动阶段就成环）
 - 业务模块可以依赖 `database` 的 schema 与 `DatabaseService`（@Global）
-- 业务模块之间不互相 import，需要共享时下沉到 `shared`（工具）或 `common`（纯类型/契约）
+- 业务模块之间不互相 import，需要共享时下沉到 `shared`（纯工具）或
+  `common`（横切能力 / 纯契约）
 
 **测试位置**：测试文件一律放在被测代码所在目录（或其所属模块）的 `__tests__/` 下，
 `src/` 其它位置不出现 `*.spec.ts`；`tsconfig.build.json` 已排除 `__tests__`，构建产物不含测试。
@@ -140,10 +183,12 @@ kebab-case。禁止自造后缀（`*.use-case.ts` / `*.projection.ts` / `*.handl
    `type XxxResponse = Pick<Xxx, keyof typeof xxxPublicColumns>`；Service 的 `select` / `returning` 一律传它
    （不要 `Omit`、不要映射函数）；补投影字段冻结的测试
 4. `<domain>.service.ts` —— 业务逻辑；查询带 `isNull(deletedAt)`；`updatedAt` 手动更新；
-   唯一冲突转 409（先解包 `cause`）；分页/哈希从 `@/shared/common.js` 取
-5. `<domain>.controller.ts` —— REST 路由 + `ZodValidationPipe`（`@/shared/http/zod-validation.pipe.js`）
-   按参数注册 + `@ApiMessage`（`@/shared/common.js`）；路径参数放 URL 末尾（`password/:id`），
-   静态段路由排在 `:id` 前
+   **不要**为"库错误转状态码"写 catch（唯一约束冲突由
+   `common/api-response/error-mapping.ts` 的映射链转 409）；分页/哈希从 `@/shared/common.js` 取
+5. `<domain>.controller.ts` —— REST 路由 + `@ZodBody` / `@ZodQuery` / `@ZodParam` / `@ZodParams`
+   （`@/common/validation/param.decorator.js`，内部组合 `ZodValidationPipe`）+ `@ApiMessage`
+   （`@/common/api-response/response.decorator.js`）；路径参数放 URL 末尾（`password/:id`），
+   静态段路由排在 `:id` 前；非幂等写接口按需加 `@Idempotent()`
 6. `<domain>.module.ts` —— 声明 controller/service（`DatabaseModule` 是 `@Global`，无需 import）
 7. 在 `app.module.ts` 的 `imports` 注册模块
 8. 按第 12 节验证；测试写到 `<domain>/__tests__/*.spec.ts`，只测本模块代码

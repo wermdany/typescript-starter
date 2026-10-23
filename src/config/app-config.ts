@@ -5,8 +5,8 @@ import { z } from 'zod';
  *
  * - `env.ts` —— **底层/运维配置**（随部署环境变化，写 .env）：日志、数据库、端口，
  *   由 `ENV` provider 注入，键名与环境变量一一对应
- * - 本文件 —— **业务/领域配置**（登录会话与登录策略，不随部署环境变化，写在代码里）：
- *   业务层 `@Inject(APP_CONFIG)` 拿打平的 camelCase 字段，感知不到环境变量
+ * - 本文件 —— **业务/领域配置**（登录会话、登录策略、HTTP 幂等窗口，不随部署环境变化，
+ *   写在代码里）：业务层 `@Inject(APP_CONFIG)` 拿打平的 camelCase 字段，感知不到环境变量
  *
  * 新增业务配置项：在 `appConfigSchema` 声明字段，在下方 `appConfigSource` 给值，
  * 启动时经 zod 校验 fail-fast。
@@ -15,6 +15,7 @@ import { z } from 'zod';
 /** 分钟 → 毫秒 / 天 → 毫秒 */
 const MINUTE_MS = 60_000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
+const HOUR_MS = 60 * MINUTE_MS;
 
 /** AppConfig 的 DI provider token（业务层 `@Inject(APP_CONFIG)` 注入用） */
 export const APP_CONFIG = Symbol('APP_CONFIG');
@@ -44,6 +45,18 @@ export const appConfigSchema = z.object({
   // ─── refreshToken Cookie ───
   /** RT 走 HttpOnly Cookie（关闭则退回 body/header 传 RT，供非浏览器客户端） */
   refreshCookieEnabled: z.boolean(),
+
+  // ─── HTTP 幂等 ───
+  //
+  // 这三个键刻意**不走环境变量**：它们只影响"重复提交"这一种边缘路径，
+  // 不属于运维视角需要按环境调整的底层配置（对照 `env.ts`）。改动上线走代码评审，
+  // 同时避免 `.env.example` 与 envSchema 的同步成本。
+  /** 成功快照的保留时长（毫秒）：超过后同一个 `Idempotency-Key` 视为新请求 */
+  idempotencyTtlMs: z.number().int().positive(),
+  /** 内存幂等表的条目上限（插入序淘汰最旧一条），防无界增长 */
+  maxEntries: z.number().int().positive(),
+  /** in-flight 占位的超时（毫秒）：超时视为陈旧允许接管，防进程内死锁 */
+  inFlightTimeoutMs: z.number().int().positive(),
 });
 
 export type AppConfig = z.infer<typeof appConfigSchema>;
@@ -61,6 +74,10 @@ const appConfigSource = {
   trustProxy: false,
 
   refreshCookieEnabled: true,
+
+  idempotencyTtlHours: 24,
+  maxEntries: 1000,
+  inFlightTimeoutSeconds: 30,
 } as const;
 
 /**
@@ -80,4 +97,8 @@ export const appConfig: AppConfig = appConfigSchema.parse({
   trustProxy: appConfigSource.trustProxy,
 
   refreshCookieEnabled: appConfigSource.refreshCookieEnabled,
+
+  idempotencyTtlMs: appConfigSource.idempotencyTtlHours * HOUR_MS,
+  maxEntries: appConfigSource.maxEntries,
+  inFlightTimeoutMs: appConfigSource.inFlightTimeoutSeconds * 1000,
 });

@@ -79,10 +79,14 @@
 
 改完路由标注**必须**跑 `pnpm perm:audit`，它有非零退出码，红了不许合并。
 
-`@AdminOnly()` **已彻底移除**：装饰器、`ADMIN_ONLY_KEY`、`AuthGuard` 里的 adminOnly 分支、
+`@AdminOnly()` **已彻底移除**：装饰器、`ADMIN_ONLY_KEY`、`AccessGuard` 里的 adminOnly 分支、
 `perm:audit` 的 `--strict-legacy`、`markers.mjs` 的遗留识别 —— 全部删除，不留安全网。
 现在它不再是合法标记：谁再写上，`perm:audit` 会把它判为**未追踪路由**并直接失败。
-管理员语义一律用权限码表达，`AuthGuard` 只管"有没有登录"。
+管理员语义一律用权限码表达，`AccessGuard` 只回答"这条路由放不放行"。
+
+四个装饰器都从 `@/common/auth/access.decorator.js` 取（写同一把 `ACCESS_INTENT_KEY`），
+判定逻辑在 `@/common/auth/access.ts` 的 `resolveAccess()`，接入 Nest 上下文在
+`@/common/auth/access.guard.ts` 的 `AccessGuard`（唯一守卫，由 `common/http-stages.ts` 注册）。
 
 角色判定只能走三个原语（`src/common/auth/auth.contract.ts`）：
 

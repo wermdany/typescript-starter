@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FileLogger } from '@/logger/file-logger.js';
 import { getLogLevels } from '@/logger/log-levels.js';
-import { runWithTraceId } from '@/logger/trace.js';
+import { runWithTraceId } from '@/common/context/trace.js';
 
 /** 全部级别都开启，测试落盘时不被级别过滤干扰 */
 const ALL = getLogLevels('verbose');

@@ -27,7 +27,7 @@
 ```
 
 - **参数校验失败（400）**：`message` 默认 `DEFAULT_VALIDATION_MESSAGE`（「参数校验失败」），
-  可用 `new ZodValidationPipe(schema, { message: '…' })` 覆盖；`errors` 由 zod `issues` 映射而来，
+  可用 `@ZodBody(schema, { message: '…' })` 覆盖；`errors` 由 zod `issues` 映射而来，
   路径用点号（`address.city`），根级为空串
 - **业务失败（401/404/409 等）**：`message` 为自描述短原因（如「用户不存在」「学号已存在」），无 `errors`
 - **未知异常（500）**：`message` 固定「服务器内部错误」，堆栈只写服务端日志
@@ -79,13 +79,19 @@ this.db.update(users).set(...).returning(userPublicColumns)       // → UserRes
 
 ## 6. 请求校验
 
-zod 管道按参数显式注册（不存在全局 ValidationPipe）：
+zod 管道按参数显式注册（不存在全局 ValidationPipe），调用点统一用
+`@/common/validation/param.decorator.js` 的组合装饰器：
 
 ```ts
-create(@Body(new ZodValidationPipe(createUserSchema)) dto: CreateUserDto) {}
-
-findOne(@Param('id', new ZodValidationPipe(idParamSchema)) id: IdParam) {}
+create(@ZodBody(createUserSchema) dto: CreateUserDto) {}
+findOne(@ZodParam('id', idParamSchema) id: IdParam) {}
+findAll(@ZodQuery(queryUsersSchema) query: QueryUsersDto) {}
+revoke(@ZodParams(userSessionParamsSchema) params: UserSessionParams) {}
 ```
+
+四个装饰器只是 `@Body()` / `@Query()` / `@Param()` + `new ZodValidationPipe(schema)` 的组合
+（校验逻辑仍只有管道一份），好处是调用点不再散落 `new ZodValidationPipe(`，
+静态 grep 就能数出"有多少个参数被校验"。**不要在 controller 里直接 new 管道。**
 
 ### body：严格，不做空值宽恕
 
@@ -106,7 +112,7 @@ JSON body 原样进 schema（只去掉文本字段首尾空白）：
 - `''` 与纯空白 → `undefined`（optional 字段跳过，有默认值的回落默认值）
 - URL 的值是字符串装配的产物，`?keyword=` 是传输层假象而非调用方意图
 - 仅递归普通对象，数组元素不动
-- 调用点零改动：`@Query(...)` 自动宽容，`@Body(...)` / `@Param(...)` 自动严格
+- 调用点零改动：`@ZodQuery(...)` 自动宽容，`@ZodBody(...)` / `@ZodParam(...)` 自动严格
 
 ### 首尾空白
 
