@@ -48,6 +48,7 @@
 | 14 | 唯一冲突转 409 前先解包 `err.cause` | 读 `err.code` | 解包 `DrizzleQueryError` | 人工 review |
 | 15 | `success === (状态码 2xx)` | 200 + `success:false` | 失败走过滤器 | 测试 + 人工 review |
 | 16 | `envSchema` 与 `.env.example` 一一对应 | 只改一处 | 两边同步 | `env-example-sync` 规则 |
+| 17 | 跨用户操作的准入问**权限码**，不问角色 | `isAdmin(actor)` 分支 | `mayActOnOthers(actor, 'user:delete')` | `admin-role-branch` 规则 |
 
 ---
 

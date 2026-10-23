@@ -6,7 +6,6 @@ const USAGE = `用法：node scripts/permission-audit.mjs [选项]
 
 选项：
   --root=<dir>       覆盖扫描根目录（默认：src）
-  --strict-legacy    将 @AdminOnly 遗留标记计为失败
   --strict-conflict  将 RequirePermission/OwnerOrPermission 冲突计为失败
   --json             输出可供机器读取的 JSON
   --list-codes       只输出扫描到的静态权限码
@@ -49,7 +48,6 @@ async function main() {
 function parseArguments(args) {
   const options = {
     root: 'src',
-    strictLegacy: false,
     strictConflict: false,
     json: false,
     listCodes: false,
@@ -58,9 +56,7 @@ function parseArguments(args) {
   };
 
   for (const argument of args) {
-    if (argument === '--strict-legacy') {
-      options.strictLegacy = true;
-    } else if (argument === '--strict-conflict') {
+    if (argument === '--strict-conflict') {
       options.strictConflict = true;
     } else if (argument === '--json') {
       options.json = true;
@@ -92,12 +88,6 @@ function buildAuditResult(scan, options) {
   const tracked = routes.filter(
     (route) => route.tracking?.valid && route.errors.length === 0,
   ).length;
-  const legacy = routes.filter(
-    (route) =>
-      route.tracking?.legacy &&
-      route.tracking.valid &&
-      route.errors.length === 0,
-  ).length;
   const untracked = routes.filter((route) => route.tracking === null).length;
   const misuse = routes.filter((route) => route.errors.length > 0).length;
   const warnings = routes.reduce(
@@ -113,9 +103,6 @@ function buildAuditResult(scan, options) {
   if (misuse > 0) {
     failureReasons.push(`${misuse} 处装饰器误用`);
   }
-  if (options.strictLegacy && legacy > 0) {
-    failureReasons.push(`${legacy} 条遗留路由（strict-legacy）`);
-  }
   if (options.strictConflict && conflicts > 0) {
     failureReasons.push(`${conflicts} 处标记冲突（strict-conflict）`);
   }
@@ -125,7 +112,6 @@ function buildAuditResult(scan, options) {
     schemaVersion: 1,
     root: scan.root,
     options: {
-      strictLegacy: options.strictLegacy,
       strictConflict: options.strictConflict,
     },
     summary: {
@@ -133,7 +119,6 @@ function buildAuditResult(scan, options) {
       controllers: scan.controllers,
       routes: routes.length,
       tracked,
-      legacy,
       untracked,
       misuse,
       warnings,
@@ -153,9 +138,6 @@ function routeStatus(route) {
   }
   if (route.tracking === null) {
     return 'untracked';
-  }
-  if (route.tracking.legacy) {
-    return 'legacy';
   }
   return 'tracked';
 }
@@ -181,7 +163,7 @@ function formatHumanReport(audit, options) {
 
   lines.push(
     '────────────────────────────────────────────────────────────────────',
-    `汇总   路由 ${summary.routes} · 已追踪 ${summary.tracked}（其中遗留 ${summary.legacy}） · 未追踪 ${summary.untracked} · 误用 ${summary.misuse} · 告警 ${summary.warnings}`,
+    `汇总   路由 ${summary.routes} · 已追踪 ${summary.tracked} · 未追踪 ${summary.untracked} · 误用 ${summary.misuse} · 告警 ${summary.warnings}`,
     formatPermissionCodes(audit.permissionCodes),
   );
 
@@ -203,7 +185,7 @@ function appendRouteFindings(lines, route, options) {
     lines.push(
       `[未追踪] ${route.file}:${route.line}`,
       routeLine,
-      '    理由：既无 @RequirePermission / @OwnerOrPermission / @Public / @Authenticated，也无 @AdminOnly；修复：按路由语义补充显式标记',
+      '    理由：既无 @RequirePermission / @OwnerOrPermission / @Public / @Authenticated；修复：按路由语义补充显式标记',
     );
   }
 
@@ -212,17 +194,6 @@ function appendRouteFindings(lines, route, options) {
       `[误用]   ${location}`,
       routeLine,
       `    理由：${route.errors.map((issue) => issue.reason).join('；')}；修复：${route.errors.map((issue) => issue.suggestion).join('；')}`,
-    );
-  }
-
-  if (route.status === 'legacy') {
-    const strictHint = options.strictLegacy
-      ? '；strict-legacy 已将其计入失败'
-      : '';
-    lines.push(
-      `[遗留]   ${location}`,
-      routeLine,
-      `    提示：遗留角色判定，建议升级为对应的 @RequirePermission('资源:动作')${strictHint}`,
     );
   }
 

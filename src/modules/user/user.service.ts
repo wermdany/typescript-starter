@@ -1,6 +1,7 @@
 import {
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
   UnauthorizedException,
@@ -28,10 +29,13 @@ import {
 } from '@/shared/common.js';
 import {
   FORBIDDEN_MESSAGE,
+  PERMISSION_CHECKER,
+  WILDCARD_PERMISSION,
   assertOwnership,
-  isAdmin,
   isSystemActor,
   type Actor,
+  type PermissionChecker,
+  type PermissionCode,
   type RoleCode,
 } from '@/shared/auth.js';
 import { filterUpdatable, policyKeyFor } from './update-policy.js';
@@ -56,10 +60,32 @@ export class UserService {
   constructor(
     private readonly database: DatabaseService,
     private readonly sessions: SessionService,
+    @Inject(PERMISSION_CHECKER)
+    private readonly permissions: PermissionChecker,
   ) {}
 
   private get db() {
     return this.database.db;
+  }
+
+  /**
+   * 跨用户操作的前置判定：**只看权限码，不看角色**。
+   *
+   * 这里原先写的是 `isSystemActor(actor) || isAdmin(actor)` —— 那等于把"能不能动别人的资源"
+   * 绑死在 admin 这一个角色上：将来要加一个"能删用户但不能重置密码"的角色，只能改业务代码。
+   * 稳定的语义是权限码（`user:delete` / `user:restore` / `user:reset-password`），
+   * 角色只是权限码的载体 —— 授权关系在数据库里改，业务代码不动。
+   *
+   * 系统身份（`systemActor`）直接放行：它不持有任何角色，按 §17 的约定 `ownsResource` 恒为真。
+   * 通配码 `*` 与其它码同等处理，与路由守卫的判定保持一致。
+   */
+  private async mayActOnOthers(
+    actor: Actor,
+    code: PermissionCode,
+  ): Promise<boolean> {
+    if (isSystemActor(actor)) return true;
+    const granted = await this.permissions.resolveCodes(actor);
+    return granted.has(WILDCARD_PERMISSION) || granted.has(code);
   }
 
   /** 创建用户（哈希在 DB 操作之前计算，不占用连接） */
@@ -263,7 +289,7 @@ export class UserService {
    * 只做后者的话，管理员反而删不了别人 —— 两道一起才闭合。
    */
   async softDelete(actor: Actor, id: number): Promise<UserResponse> {
-    if (!isSystemActor(actor) && !isAdmin(actor)) {
+    if (!(await this.mayActOnOthers(actor, 'user:delete'))) {
       assertOwnership(actor, id, '只能删除自己的账号');
     }
     // 软删 + 吊销全部会话：同一事务。非原子时存在"用户已删但 token 仍有效"的窗口，
@@ -288,7 +314,7 @@ export class UserService {
 
   /** 恢复软删除用户（email 可能与现存用户冲突而 409）；归属规则同 `softDelete` */
   async restore(actor: Actor, id: number): Promise<UserResponse> {
-    if (!isSystemActor(actor) && !isAdmin(actor)) {
+    if (!(await this.mayActOnOthers(actor, 'user:restore'))) {
       assertOwnership(actor, id, '只能恢复自己的账号');
     }
     try {
@@ -311,8 +337,8 @@ export class UserService {
   /**
    * 修改密码：先验旧密码，通过后才写新哈希。
    *
-   * 1. 权限：本人的密码可以凭旧密码修改；管理员（或系统身份）重置他人密码
-   *    **不需要**旧密码（`oldPassword` 传什么都会被忽略，避免管理员拿到用户历史密码）
+   * 1. 权限：本人的密码可以凭旧密码修改；持有 `user:reset-password`（或系统身份）重置他人密码
+   *    **不需要**旧密码（`oldPassword` 传什么都会被忽略，避免重置者拿到用户历史密码）
    * 2. 显式 select `passwordHash`（该列不在公开白名单里）
    * 3. 先判存在再比对 —— scrypt 慢，不存在就没必要派生
    * 4. 旧密码不符返回 401：参数合法，失败点在凭据，客户端要能把两者区分开
@@ -326,7 +352,7 @@ export class UserService {
     dto: ChangePasswordDto,
     keepSessionId?: number,
   ): Promise<void> {
-    const privileged = isSystemActor(actor) || isAdmin(actor);
+    const privileged = await this.mayActOnOthers(actor, 'user:reset-password');
     if (!privileged) {
       // 第二道防线：路由上只要求"登录"，能不能改这个 id 由这里回答。
       // 用 assertOwnership 而不是手写 `actor.id !== id`：归属语义只有一处定义
@@ -342,7 +368,7 @@ export class UserService {
       throw new NotFoundException('用户不存在');
     }
 
-    // 特权身份重置他人密码不走旧密码校验；本人改自己的必须验旧密码
+    // 持有 user:reset-password 的身份重置他人密码不走旧密码校验；本人改自己的必须验旧密码
     if (!privileged) {
       const matched = await verifyPassword(dto.oldPassword, user.passwordHash);
       if (!matched) {

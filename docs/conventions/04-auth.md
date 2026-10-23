@@ -43,6 +43,10 @@
   - `PATCH /users/password/:id`（`@RequirePermission('user:reset-password')`）——
     **管理员重置**，无需旧密码，id 来自路径是合法的（有权限码守着），改完踢掉其全部登录态
   - 判断依据是"谁在改"：自助路径的 `:id` 一旦出现就是越权面；管理路径的 `:id` 是设计如此
+- **服务级第二道防线问权限码，不问角色**：`changePassword()` 内部用
+  `mayActOnOthers(actor, 'user:reset-password')` 决定"是否免旧密码 / 能否改别人的"，
+  **不写 `isAdmin(actor)`** —— 角色只是权限码的载体，加一个"能删人但不能重置密码"的角色
+  只应在数据库里授权，不改业务代码（见第 18 节）
 
 ---
 
@@ -75,10 +79,10 @@
 
 改完路由标注**必须**跑 `pnpm perm:audit`，它有非零退出码，红了不许合并。
 
-`@AdminOnly()` **已随 RBAC 全部替换而移除**（装饰器与 `ADMIN_ONLY_KEY` 都已删除）：
+`@AdminOnly()` **已彻底移除**：装饰器、`ADMIN_ONLY_KEY`、`AuthGuard` 里的 adminOnly 分支、
+`perm:audit` 的 `--strict-legacy`、`markers.mjs` 的遗留识别 —— 全部删除，不留安全网。
+现在它不再是合法标记：谁再写上，`perm:audit` 会把它判为**未追踪路由**并直接失败。
 管理员语义一律用权限码表达，`AuthGuard` 只管"有没有登录"。
-`scripts/lib/markers.mjs` 仍把它识别为遗留标记 —— 这是刻意保留的安全网，
-万一有人从旧分支合回了 `@AdminOnly()`，审计报告会标出来而不是静默放行。
 
 角色判定只能走三个原语（`src/common/auth/auth.contract.ts`）：
 
@@ -162,9 +166,12 @@ await service.softDelete(userId);            // ❌ 跳过归属判定
 
 当前豁免清单（新增需在此登记）：`SessionService.revokeAllForUser()`。
 
-⚠️ **已知弱点，请如实看待**：本项目**不做 `svc:audit` 自动化脚本**（已决策）。除 R1 能被 TypeScript
-编译期兜住之外，**R2 / R4 / R5 以及"禁止用 `isAdmin(actor)` 做业务分支"都没有机器化检查**：
-传错目标 id、或在 controller 里构造 `SystemActor`，CI 与编译都不会报错。因此：
+⚠️ **已知弱点，请如实看待**：本项目**不做 `svc:audit` 自动化脚本**（已决策）。
+R1 由 TypeScript 编译期兜住，"业务代码用 `isAdmin()` 决定能否操作别人资源"由
+`scripts/convention-audit.mjs` 的 `admin-role-branch` 规则兜住（白名单只有
+`update-policy.ts` —— 字段级白名单本来就是角色语义，§2 明确授权）。
+**R2 / R4 / R5 仍然没有机器化检查**：传错目标 id、或在 controller 里构造 `SystemActor`，
+CI 与编译都不会报错。因此：
 
 - PR 描述里加一条自检：本次是否新增/修改了面向用户资源的写方法？首参是否 `actor`？内部调用是否走了 `systemActor`？
 - review 时对新增的 service 写方法逐个看首参与断言

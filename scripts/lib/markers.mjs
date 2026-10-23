@@ -17,7 +17,7 @@
  * | 11 | `@OwnerOrPermission` 的 ownerParam 与类级 `@Controller('users/:userId')` 里的参数同名 | C1 需要合并类前缀后再解析参数名，否则误报 | 合并 `@Controller(prefix) + @Get(path)` 后统一提取 `:xxx` |
  * | 12 | 路由用通配符（`@Get('*')` / 正则路由） | 参数列表不敢断言 → C1 放宽为 warn | 路径含 `*` 或 `(` 时降级为提示 |
  * | 13 | ownerParam 指向的不是用户 ID（未来扩展到 session 等资源） | 守卫会把 `actor.id` 与业务 ID 比较 ⇒ 语义错误 | 约定 ownerParam 只能指向用户 ID；其他资源走 service 断言（§10.2） |
- * | 14 | `@OwnerOrPermission` 与 `@AdminOnly()` 并存 | 语义以 Owner 优先，容易让人困惑 | 校验 C3 扩展：与遗留标记并存时输出提示，建议先升级 `@AdminOnly()` |
+ * | 14 | （已废弃）`@OwnerOrPermission` 与 `@AdminOnly()` 并存 | `@AdminOnly()` 已随 RBAC 落地移除，不再是合法标记；写上会被判为"未追踪" | 无 —— 直接删除该标记，用 `@RequirePermission('资源:动作')` 表达 |
  * | 15 | ① 数组形态路由（`@Get(['a', 'b'])`，Nest 支持 `string[]` path）；② 对象形态（`@Controller({ path: 'users' })`） | ① 一条 handler 展开成多个端点，少算即漏判；② 不会展开，风险是类前缀藏在对象字面量里取不到 | ① 展开后逐条判定与计数；② 从对象字面量的 `path` 属性取前缀，取不到按 `<动态路径:...>` 显示（**路径显示不改变追踪判定**，别把它做成失败项） |
  * | 16 | 只按装饰器最终名称识别，无模块解析 | 同名本地装饰器会被误判为标记 | 约定标记装饰器只从 `@/shared/auth.js` 取；脚本可在"疑似未识别装饰器"里列出可疑来源供人工确认（与 #1 对齐） |
  * | 17 | 报告「扫描 N 个文件」的口径 | 读者会以为 `N` 随工程/脚本数量漂移 | `N` = 扫描根下递归到的 `.ts` 文件数：排除 `__tests__/`、`dist/`、`node_modules/` 与 `*.d.ts`，`.mjs`（脚本自身）不在口径内；加脚本不会让 `N` 变化 |
@@ -37,13 +37,11 @@ export const MARKER_NAMES = Object.freeze({
   authenticated: 'Authenticated',
   permission: 'RequirePermission',
   owner: 'OwnerOrPermission',
-  legacy: 'AdminOnly',
   tracking: new Set([
     'Public',
     'Authenticated',
     'RequirePermission',
     'OwnerOrPermission',
-    'AdminOnly',
   ]),
 });
 
@@ -94,7 +92,6 @@ export function analyzeRouteMarkers({
   const byName = groupMarkersByName(markers);
   const permissionMarkers = byName.get(MARKER_NAMES.permission) ?? [];
   const ownerMarkers = byName.get(MARKER_NAMES.owner) ?? [];
-  const legacyMarkers = byName.get(MARKER_NAMES.legacy) ?? [];
 
   for (const marker of permissionMarkers) {
     analyzePermissionMarker({
@@ -133,23 +130,11 @@ export function analyzeRouteMarkers({
     });
   }
 
-  if (ownerMarkers.length > 0 && legacyMarkers.length > 0) {
-    const marker = ownerMarkers[0];
-    warnings.push({
-      code: 'owner-admin-coexist',
-      line: marker.line,
-      reason:
-        '@OwnerOrPermission 与 @AdminOnly 并存，审计按 Owner 优先，但运行时仍可能受到遗留管理员限制',
-      suggestion: '先移除或升级 @AdminOnly，避免两套权限语义叠加',
-    });
-  }
-
   const selectedMarker = selectTrackingMarker(byName);
   const tracking = selectedMarker
     ? {
         kind: trackingKind(selectedMarker.name),
         valid: errors.length === 0,
-        legacy: selectedMarker.name === MARKER_NAMES.legacy,
       }
     : null;
 
@@ -353,7 +338,6 @@ function selectTrackingMarker(byName) {
     MARKER_NAMES.owner,
     MARKER_NAMES.permission,
     MARKER_NAMES.authenticated,
-    MARKER_NAMES.legacy,
   ];
   for (const name of priority) {
     const marker = byName.get(name)?.[0];
@@ -377,5 +361,6 @@ function trackingKind(markerName) {
   if (markerName === MARKER_NAMES.owner) {
     return 'owner';
   }
-  return 'legacy';
+  // 追踪标记只剩上面四类（`@AdminOnly` 已移除）；走到这里说明新增了标记却没登记 kind
+  return 'unknown';
 }

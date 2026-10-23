@@ -125,12 +125,36 @@ index('users_nickname_idx').on(t.nickname)                    // 非外键，完
 
 **选项**：① 连装饰器一起删除，注释改掉，`--strict-legacy` 保留空跑 ← 建议 ② 保留装饰器，只改文档措辞
 
-- **决策：选 1（已执行，但脚本侧刻意保留）** ——
+- **决策：选 1（已执行；脚本侧也全部清干净）** ——
   删除：`AdminOnly` 与 `ADMIN_ONLY_KEY`（`auth.decorator.ts`）、`AuthGuard` 的 adminOnly 分支、
-  barrel 导出、4 处注释、`auth.guard.spec.ts` 的 3 个过时用例。
-  保留：`scripts/lib/markers.mjs` 仍把它识别为遗留标记 —— 万一有人从旧分支合回 `@AdminOnly()`，
-  审计会标出来而不是静默放行（`rbac-plan.md:439` 的既定计划就是"全部替换后废弃"）。
+  barrel 导出、4 处注释、`auth.guard.spec.ts` 的 3 个过时用例，
+  **以及** `markers.mjs` 的遗留识别、`perm:audit` 的 `--strict-legacy` 与"遗留"报告分支。
+  现在 `@AdminOnly()` 不再是合法标记，写上会被 `perm:audit` 判为未追踪路由并失败（fail-closed）。
   守卫行为变化：`AuthGuard` 现在只管"有没有登录"，管理员/权限点全部归 `PermissionGuard`。
+
+### A2 续：权限验证全部归于 RBAC（含 service 内部）
+
+用户追加要求：改密等"能不能动别人资源"的判定要归 RBAC，清掉 Admin 系的角色分支。
+
+`isAdmin(actor)` 在业务代码里有 4 处，3 处是"跨用户操作准入"：
+
+| 位置 | 原来 | 现在 |
+| --- | --- | --- |
+| `UserService.softDelete` | `!isSystemActor(actor) && !isAdmin(actor)` | `!(await mayActOnOthers(actor, 'user:delete'))` |
+| `UserService.restore` | 同上 | `mayActOnOthers(actor, 'user:restore')` |
+| `UserService.changePassword` | `isSystemActor(actor) \|\| isAdmin(actor)` | `mayActOnOthers(actor, 'user:reset-password')` |
+| `update-policy.ts:50` | `isAdmin(actor)` → 角色→可改字段集 | **保留**（§2 明确授权的字段级白名单，本来就是角色语义） |
+
+配套改动：
+- `RbacModule` 改为 `@Global()` —— `PERMISSION_CHECKER` 要在 service 里用，
+  而业务模块之间不互相 import（与 `DatabaseModule` 同为基础设施层的全局模块）。
+  文档已如实写明：删掉 `app.core.module.ts` 那行仍能关掉全局守卫，
+  但注入了 `PERMISSION_CHECKER` 的 service 会启动失败 —— 回滚开关的边界变了
+- 新增 `admin-role-branch` 审计规则：`isAdmin()` 出现在业务代码即违规
+  （白名单 `common/` `shared/` `modules/rbac/` 与 `update-policy.ts`）。已用临时探针验证能抓到
+- §18 的"已知弱点"同步：R2/R4/R5 仍无机器化检查，但 isAdmin 分支这条**已有**
+
+- **决策：已执行**
 
 ---
 

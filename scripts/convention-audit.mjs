@@ -50,6 +50,15 @@ const FORBIDDEN_FILE_SUFFIX_RE = /\.(use-case|projection|handler|policy)\.ts$/;
 /** 整名即自造后缀的测试文件（如 `projection.spec.ts`）：去掉 `.spec.ts` 后整名命中。 */
 const FORBIDDEN_BARE_NAMES = new Set(['projection.ts', 'use-case.ts', 'handler.ts', 'policy.ts']);
 
+/**
+ * `isAdmin()` 的合法使用处：契约定义（`common/`）、守卫与 barrel（`shared/`）、
+ * 权限码解析器（`modules/rbac/`）。业务模块里出现即视为"用角色代替权限码做分支"。
+ */
+const ADMIN_BRANCH_EXEMPT_PREFIXES = ['src/common/', 'src/shared/', 'src/modules/rbac/'];
+
+/** §2 明确授权的白名单位置：字段级修改权限用「角色 → 可改字段集」映射，那本来就是角色语义。 */
+const ADMIN_BRANCH_EXEMPT_FILES = new Set(['update-policy.ts']);
+
 /** 环境变量"唯一声明处"与模板的一致性比对（§4）。 */
 const ENV_SCHEMA_FILE = 'src/config/env.ts';
 const ENV_EXAMPLE_FILE = '.env.example';
@@ -119,6 +128,11 @@ const RULE_META = {
     section: '§4',
     title: 'envSchema 与 .env.example 必须一一对应',
     suggest: '新增变量同时改 `src/config/env.ts` 与 `.env.example`（清单别手抄，以本规则为准）',
+  },
+  'admin-role-branch': {
+    section: '§16 §18',
+    title: '业务代码不用 isAdmin() 决定"能否操作别人的资源"',
+    suggest: '准入问权限码（`user:delete` / `user:restore` / `user:reset-password`），角色只是权限码的载体',
   },
 };
 
@@ -435,6 +449,7 @@ function collectAstFindings(sourceFile, file, options, findings) {
     checkTimestampsSpread(node, sourceFile, file, options, findings);
     checkCoerce(node, sourceFile, file, options, findings);
     checkManualResponse(node, sourceFile, file, options, findings);
+    checkAdminRoleBranch(node, sourceFile, file, options, findings);
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
@@ -525,6 +540,23 @@ function checkManualResponse(node, sourceFile, file, options, findings) {
   if (ts.isIdentifier(owner) && ['res', 'response'].includes(owner.text) && ['status', 'json', 'send', 'end'].includes(method)) {
     addFinding(findings, options, 'manual-response', file, lineOf(node, sourceFile), `Controller 手写响应：${node.getText(sourceFile).replace(/\s+/g, ' ')}`);
   }
+}
+
+function checkAdminRoleBranch(node, sourceFile, file, options, findings) {
+  if (!ts.isCallExpression(node) || !ts.isIdentifier(node.expression) || node.expression.text !== 'isAdmin') {
+    return;
+  }
+  if (isExempt(file, ADMIN_BRANCH_EXEMPT_PREFIXES) || ADMIN_BRANCH_EXEMPT_FILES.has(path.basename(file))) {
+    return;
+  }
+  addFinding(
+    findings,
+    options,
+    'admin-role-branch',
+    file,
+    lineOf(node, sourceFile),
+    '用 isAdmin() 决定"能不能操作别人的资源"：新增角色就要改业务代码；应改为按权限码判定',
+  );
 }
 
 function isEqualityOperator(kind) {
