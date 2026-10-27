@@ -1,9 +1,11 @@
 import {
+  applyDecorators,
   createParamDecorator,
   ExecutionContext,
   SetMetadata,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiExtension } from '@nestjs/swagger';
 import type { Request } from 'express';
 
 import {
@@ -11,6 +13,8 @@ import {
   type AuthenticatedUser,
 } from '@/common/auth/auth.contract.js';
 import { ACCESS_INTENT_KEY, type AccessIntent } from '@/common/auth/access.js';
+import { BEARER_SCHEME } from '@/common/openapi/document.js';
+import { ApiCommonError } from '@/common/openapi/response.decorator.js';
 import type { PermissionCode } from '@/common/auth/permission.contract.js';
 
 export type { AuthenticatedUser } from '@/common/auth/auth.contract.js';
@@ -61,14 +65,20 @@ export const Public = () =>
  *
  * 与 `@Public()` 的区别：`@Public()` 连登录都不要；`@Authenticated()` 要登录。
  *
+ * 文档侧随之带出 401 与 bearer 鉴权 —— 鉴权要求只在**一个地方**声明。
+ *
  * @example
  * @Authenticated()
  * @Get('me')
  */
 export const Authenticated = () =>
-  SetMetadata(ACCESS_INTENT_KEY, {
-    kind: 'authenticated',
-  } satisfies AccessIntent);
+  applyDecorators(
+    SetMetadata(ACCESS_INTENT_KEY, {
+      kind: 'authenticated',
+    } satisfies AccessIntent),
+    ApiBearerAuth(BEARER_SCHEME),
+    ApiCommonError(401),
+  );
 
 /**
  * 声明路由要求的权限码（**任一命中即放行**，AND 需求请拆成多个路由或下沉到 service）。
@@ -83,10 +93,16 @@ export const Authenticated = () =>
  * @Post()
  */
 export const RequirePermission = (...codes: PermissionCode[]) =>
-  SetMetadata(ACCESS_INTENT_KEY, {
-    kind: 'permission',
-    codes,
-  } satisfies AccessIntent);
+  applyDecorators(
+    SetMetadata(ACCESS_INTENT_KEY, {
+      kind: 'permission',
+      codes,
+    } satisfies AccessIntent),
+    ApiBearerAuth(BEARER_SCHEME),
+    ApiExtension('x-permission', [...codes]),
+    ApiCommonError(401),
+    ApiCommonError(403),
+  );
 
 /**
  * 声明「本人 或 持有权限码」的路由（OR 语义）。
@@ -107,11 +123,21 @@ export const OwnerOrPermission = (
   ownerParam: string,
   ...codes: PermissionCode[]
 ) =>
-  SetMetadata(ACCESS_INTENT_KEY, {
-    kind: 'owner',
-    ownerParam,
-    codes,
-  } satisfies AccessIntent);
+  applyDecorators(
+    SetMetadata(ACCESS_INTENT_KEY, {
+      kind: 'owner',
+      ownerParam,
+      codes,
+    } satisfies AccessIntent),
+    ApiBearerAuth(BEARER_SCHEME),
+    // `x-owner-param` 与 `x-permission` 合起来表达 OR 语义：
+    // 路径参数命中本人则放行，否则要求权限码
+    ApiExtension('x-owner-param', ownerParam),
+    ...(codes.length > 0
+      ? [ApiExtension('x-permission', [...codes]), ApiCommonError(403)]
+      : []),
+    ApiCommonError(401),
+  );
 
 /**
  * 取当前登录用户（认证中间件注入的 `req.user`）。

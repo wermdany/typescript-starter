@@ -1,4 +1,6 @@
-import type { RoleCode } from '@/common/auth/auth.contract.js';
+import { z } from 'zod';
+
+import { ROLE_CODES } from '@/common/auth/auth.contract.js';
 import { users, type Users } from '@/database/schema/users.schema.js';
 
 /**
@@ -22,17 +24,37 @@ export const authUserColumns = {
 /** 认证用例里的用户记录 */
 export type AuthUser = Pick<Users, keyof typeof authUserColumns>;
 
+/** 角色码的文档 schema；取自 `ROLE_CODES`，加角色时只改契约一处 */
+const roleCodesSchema = z
+  .array(z.enum(ROLE_CODES))
+  .describe('角色码集合；按角色等级降序、角色码升序排列');
+
 /**
- * 登录响应里内嵌的用户摘要。
+ * 当前身份响应（前端刷新页面后据此重建本地登录态）。
  *
- * 只含前端登录后立即可用的身份字段；**不含** `points` / `createdAt` 等资料字段
- * （需要完整资料时走 `GET /users/:id`），也**不含** `passwordHash`。
+ * 嵌套结构 + 会话字段，不是表行，因此 schema 是唯一出处，类型由它推。
  *
- * 角色来自 `user_roles` 关联表，顺序按 `roles.level` 降序。
+ * `user` 比登录响应内嵌的摘要多了 `email` / `points`：这里是"当前身份"视图，
+ * 登录响应只需要"登录后立即可用"的字段，两者需求不同，因此各自声明。
  */
-export interface UserSummary {
-  id: number;
-  studentNo: string;
-  nickname: string;
-  roles: readonly RoleCode[];
-}
+export const meResultSchema = z
+  .object({
+    user: z
+      .object({
+        id: z.number().int().describe('用户 ID'),
+        studentNo: z.string().describe('学号'),
+        email: z.string().describe('邮箱'),
+        nickname: z.string().describe('昵称'),
+        roles: roleCodesSchema,
+        points: z.number().int().describe('积分'),
+      })
+      .describe('当前登录用户的资料摘要'),
+    sessionId: z
+      .number()
+      .int()
+      .describe('本次请求所用会话，前端可用于在设备列表里高亮「本机」'),
+  })
+  .meta({ id: 'MeResult', description: '当前身份' });
+
+
+export type MeResult = z.infer<typeof meResultSchema>;

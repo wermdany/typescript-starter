@@ -3,18 +3,8 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import type { PageResponse } from '@/shared/common.js';
 import type { AuthenticatedUser } from '@/common/auth/auth.contract.js';
 import { SessionService } from './session.service.js';
-import type { SessionResponse } from './dto/session.dto.js';
-
-/** 会话 + 是否当前请求所用（列表里给前端标出"本机"） */
-export type SessionWithCurrent = SessionResponse & { current: boolean };
-
-/** 踢出结果 */
-export interface RevokeAllResult {
-  /** 实际被吊销的会话数 */
-  revoked: number;
-  /** 本次请求自身的会话是否也被吊销（决定前端是否要清本地登录态） */
-  currentRevoked: boolean;
-}
+import type { RevokeAllResult } from './dto/revoke-all.dto.js';
+import type { SessionResponse, SessionWithCurrent } from './dto/session.dto.js';
 
 /** 列表 query 的最小形状（与 zod DTO 解耦，用例层不依赖 DTO 类型） */
 export interface SessionListQuery {

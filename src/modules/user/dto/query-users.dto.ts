@@ -16,8 +16,15 @@ import { userRoleSchema } from './create-user.dto.js';
  */
 export const queryUsersSchema = paginationSchema.extend(
   trimmedShape({
-    keyword: z.string().min(1).max(50).optional(),
-    role: userRoleSchema.optional(),
+    keyword: z
+      .string()
+      .min(1)
+      .max(50)
+      .optional()
+      .describe('模糊匹配昵称 / 学号 / 邮箱'),
+    role: userRoleSchema
+      .optional()
+      .describe('筛「持有该角色」的用户（多角色命中任一即可）'),
     sortBy: z
       .enum([
         'nickname',
@@ -27,8 +34,9 @@ export const queryUsersSchema = paginationSchema.extend(
         'createdAt',
         'updatedAt',
       ])
-      .default('updatedAt'),
-    order: z.enum(['asc', 'desc']).default('desc'),
+      .default('updatedAt')
+      .describe('排序字段，默认 updatedAt'),
+    order: z.enum(['asc', 'desc']).default('desc').describe('排序方向，默认降序'),
   }),
 );
 

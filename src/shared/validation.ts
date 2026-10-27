@@ -5,6 +5,8 @@
  * import { paginationSchema, passwordSchema, trimmedShape } from './validation.js';
  */
 export { trimmed, trimmedShape } from '@/shared/validation/trimmed.js';
+export { dateSchema } from '@/shared/validation/date.js';
+export { schemaFor } from '@/shared/validation/schema-for.js';
 export {
   LEGACY_PASSWORD_MAX_LENGTH,
   PASSWORD_ALLOWED_CHARS,
@@ -14,6 +16,7 @@ export {
   passwordSchema,
 } from '@/shared/validation/password.js';
 export {
+  pageOf,
   paginationSchema,
   type PaginationQuery,
 } from '@/shared/pagination/pagination.schema.js';

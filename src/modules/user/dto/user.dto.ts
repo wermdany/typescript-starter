@@ -1,5 +1,9 @@
+import { z } from 'zod';
+
 import type { RoleCode } from '@/common/auth/auth.contract.js';
 import { users, type Users } from '@/database/schema/users.schema.js';
+import { dateSchema, pageOf, schemaFor } from '@/shared/validation.js';
+import { userRoleSchema } from './create-user.dto.js';
 
 /**
  * 对外公开字段**白名单**（响应契约的唯一出处）。
@@ -54,3 +58,46 @@ export function toUserResponse(
 ): UserResponse {
   return { ...scalars, roles };
 }
+
+/**
+ * `UserResponse` 的文档 schema。
+ *
+ * 7 个单表列从 `userPublicColumns` 派生（字段集合、类型、可空性全部同源：
+ * `passwordHash` / `deletedAt` 不在白名单里，因此也不会出现在文档里）；
+ * 手工补的只有 `roles` —— 它来自 `user_roles` 关联表，白名单里没有。
+ */
+/**
+ * `UserResponse` 的文档 schema。
+ *
+ * 字段与类型都写在这里，`z.ZodType<UserResponse>` 是**编译期锚定**：
+ * 白名单加一列而这里没跟上、或类型/可空性写错，`pnpm typecheck` 直接红。
+ * 描述就地写在字段上（`.describe()`），不需要另开一张说明表。
+ */
+export const userResponseSchema = schemaFor<UserResponse>()(
+  z
+  .object({
+    id: z.number().int().describe('用户 ID'),
+    studentNo: z.string().describe('学号（登录账号，全局唯一）'),
+    email: z.string().describe('邮箱（软删除后可以被重新使用）'),
+    nickname: z.string().describe('昵称'),
+    points: z.number().int().describe('积分'),
+    createdAt: dateSchema.describe('创建时间（数据库自动填充）'),
+    updatedAt: dateSchema.describe('最后修改时间（更新需应用层手动写）'),
+    roles: z
+      .array(userRoleSchema)
+      .describe('角色码集合；按角色等级降序、角色码升序稳定排列'),
+  })
+  .meta({ id: 'UserResponse', description: '对外用户投影' }),
+);
+
+/** 用户分页列表的文档 schema */
+export const userPageSchema = pageOf(userResponseSchema).meta({
+  id: 'UserResponsePage',
+});
+
+/** 健康检查响应（`GET /users/health`） */
+export const healthStatusSchema = z
+  .object({ status: z.literal('ok').describe('固定为 ok；能拿到它就说明进程与路由都活着') })
+  .meta({ id: 'HealthStatus' });
+
+

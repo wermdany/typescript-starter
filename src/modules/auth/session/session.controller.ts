@@ -8,6 +8,7 @@ import {
   Post,
   Res,
 } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 
 import { ApiMessage } from '@/common/api-response/response.decorator.js';
@@ -17,6 +18,7 @@ import {
   RequirePermission,
   type AuthenticatedUser,
 } from '@/common/auth/access.decorator.js';
+import { ApiRoute } from '@/common/openapi/route.decorator.js';
 import {
   ZodBody,
   ZodParam,
@@ -32,7 +34,13 @@ import {
   querySessionsSchema,
   type QuerySessionsDto,
 } from './dto/query-sessions.dto.js';
-import { revokeAllSchema, type RevokeAllDto } from './dto/revoke-all.dto.js';
+import {
+  revokeAllResultSchema,
+  revokeAllSchema,
+  revokedCountSchema,
+  type RevokeAllDto,
+  type RevokeAllResult,
+} from './dto/revoke-all.dto.js';
 import {
   sessionIdParamSchema,
   userSessionParamsSchema,
@@ -41,11 +49,8 @@ import {
   type UserIdParam,
   type UserSessionParams,
 } from './dto/session-params.dto.js';
-import type { SessionResponse } from './dto/session.dto.js';
+import { sessionPageSchema, type SessionWithCurrent } from './dto/session.dto.js';
 import { SessionManagerService } from './session-manager.service.js';
-
-/** 会话 + 是否当前请求所用（列表里给前端标出"本机"） */
-export type SessionWithCurrent = SessionResponse & { current: boolean };
 
 /**
  * 会话管理接口（**找 session 的接口来这个文件**）。
@@ -58,6 +63,7 @@ export type SessionWithCurrent = SessionResponse & { current: boolean };
  * 参数校验统一走 `@ZodBody` / `@ZodQuery` / `@ZodParam` / `@ZodParams`，
  * schema 与来源一次绑定，调用点不出现管道构造。
  */
+@ApiTags('会话')
 @Controller()
 export class SessionController {
   constructor(
@@ -71,6 +77,11 @@ export class SessionController {
   /** 退出全部设备：默认包含当前设备（连当前设备时一并清 Cookie） */
   @Authenticated()
   @ApiMessage('已退出所有设备')
+  @ApiRoute({
+    summary: '退出全部设备',
+    description: '默认连当前设备一起踢；keepCurrent=true 可保留本机',
+    data: revokeAllResultSchema,
+  })
   @Post('auth/sessions/revoke-all')
   @HttpCode(HttpStatus.OK)
   async revokeAll(
@@ -87,6 +98,11 @@ export class SessionController {
 
   /** 我的登录设备 */
   @Authenticated()
+  @ApiRoute({
+    summary: '我的登录设备',
+    description: 'current 标出本次请求所用的会话',
+    data: sessionPageSchema,
+  })
   @Get('auth/sessions')
   listMySessions(
     @CurrentUser() user: AuthenticatedUser,
@@ -98,6 +114,11 @@ export class SessionController {
   /** 踢掉我的某台设备（踢的是当前设备时一并清 Cookie） */
   @Authenticated()
   @ApiMessage('设备已下线')
+  @ApiRoute({
+    summary: '踢掉我的某台设备',
+    description: '踢的是当前设备时会一并清 Cookie',
+    data: null,
+  })
   @Delete('auth/sessions/:id')
   @HttpCode(HttpStatus.OK)
   async revokeMySession(
@@ -116,6 +137,11 @@ export class SessionController {
   /** 管理员：踢出某用户的全部登录态 */
   @RequirePermission('session:revoke')
   @ApiMessage('已踢出该用户的登录态')
+  @ApiRoute({
+    summary: '踢出某用户的全部登录态',
+    description: '管理员视角；返回实际被吊销的会话数',
+    data: revokedCountSchema,
+  })
   @Delete('users/sessions/:id')
   @HttpCode(HttpStatus.OK)
   adminRevokeUserSessions(
@@ -126,6 +152,11 @@ export class SessionController {
 
   /** 管理员：查看某用户的登录设备 */
   @RequirePermission('session:read')
+  @ApiRoute({
+    summary: '查看某用户的登录设备',
+    description: '管理员视角；会话 ID 与目标用户不匹配时按 404 处理',
+    data: sessionPageSchema,
+  })
   @Get('users/:id/sessions')
   adminListUserSessions(
     @CurrentUser() operator: AuthenticatedUser,
@@ -138,6 +169,11 @@ export class SessionController {
   /** 管理员：踢出某用户的单个会话 */
   @RequirePermission('session:revoke')
   @ApiMessage('设备已下线')
+  @ApiRoute({
+    summary: '踢出某用户的单个会话',
+    description: '管理员视角；会话不属于该用户时按 404 处理',
+    data: null,
+  })
   @Delete('users/:id/sessions/:sessionId')
   @HttpCode(HttpStatus.OK)
   adminRevokeUserSession(
@@ -145,12 +181,4 @@ export class SessionController {
   ): Promise<void> {
     return this.sessions.revokeUserSession(params.id, params.sessionId);
   }
-}
-
-/** 踢出结果（`revoke-all` 的响应） */
-export interface RevokeAllResult {
-  /** 实际被吊销的会话数 */
-  revoked: number;
-  /** 本次请求自身的会话是否也被吊销（决定前端是否要清本地登录态） */
-  currentRevoked: boolean;
 }

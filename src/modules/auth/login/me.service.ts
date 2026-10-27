@@ -3,24 +3,9 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import {
   UNAUTHENTICATED_MESSAGE,
   type AuthenticatedUser,
-  type RoleCode,
 } from '@/common/auth/auth.contract.js';
+import type { MeResult } from './dto/user.dto.js';
 import { AccountService } from './account.service.js';
-
-/** 当前身份响应（前端刷新页面后据此重建本地登录态） */
-export interface MeResult {
-  user: {
-    id: number;
-    studentNo: string;
-    email: string;
-    nickname: string;
-    /** 多角色；顺序按 role.level 降序，前端可直接取首个当"主角色"展示 */
-    roles: readonly RoleCode[];
-    points: number;
-  };
-  /** 本次请求所用会话，前端可用于在设备列表里高亮"本机" */
-  sessionId: number;
-}
 
 /**
  * 当前身份用例。
@@ -44,7 +29,9 @@ export class MeService {
         studentNo: account.studentNo,
         email: account.email,
         nickname: account.nickname,
-        roles: user.roles,
+        // 响应类型由 schema 推导（数组是可变的），会话里的 roles 是只读视图，
+        // 这里复制一份再交出去，避免两处 readonly 语义互相将就
+        roles: [...user.roles],
         points: account.points,
       },
       sessionId: user.sessionId,

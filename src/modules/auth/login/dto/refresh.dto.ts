@@ -13,7 +13,13 @@ import { trimmedShape } from '@/shared/validation.js';
  */
 export const refreshSchema = z.object(
   trimmedShape({
-    refreshToken: z.string().max(512).optional(),
+    refreshToken: z
+      .string()
+      .max(512)
+      .optional()
+      .describe(
+        '不透明字符串（43 字符 base64url）。Cookie 模式下不需要传，由 HttpOnly Cookie 自动携带',
+      ),
   }),
 );
 

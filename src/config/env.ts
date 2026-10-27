@@ -11,6 +11,26 @@ import { config as loadEnvConfig } from 'dotenv';
 
 loadEnvConfig();
 
+/**
+ * 布尔环境变量。
+ *
+ * 不用 `z.coerce.boolean()`：`Boolean('false') === true`，字符串 'false' 会被当成开启。
+ * 这里只接受 `true` / `false`（忽略大小写与首尾空白），缺失或空串取 `fallback`。
+ */
+function envBoolean(fallback = false) {
+  return z
+    .preprocess(
+      (raw) =>
+        raw === undefined || raw === ''
+          ? fallback
+          : typeof raw === 'string'
+            ? raw.trim().toLowerCase()
+            : raw,
+      z.union([z.boolean(), z.literal('true'), z.literal('false')]),
+    )
+    .transform((v) => v === true || v === 'true');
+}
+
 export const envSchema = z.object({
   NODE_ENV: z
     .enum(['development', 'test', 'production'])
@@ -25,17 +45,22 @@ export const envSchema = z.object({
     .default('logs/app.log')
     .transform((v) => v.trim()),
   /** 是否把请求体写进日志（脱敏 + 截断），默认关闭；只接受 true/false（其余值报错） */
-  LOG_BODY: z
-    .preprocess(
-      (raw) =>
-        raw === undefined || raw === ''
-          ? false // 缺失 / 空串 = 默认关闭
-          : typeof raw === 'string'
-            ? raw.trim().toLowerCase()
-            : raw,
-      z.union([z.boolean(), z.literal('true'), z.literal('false')]),
-    )
-    .transform((v) => v === true || v === 'true'),
+  LOG_BODY: envBoolean(),
+
+  // ─── 接口文档 ─────────────────────────────────────────────
+  /**
+   * 是否挂载 OpenAPI 文档（`/<SWAGGER_PATH>`）。
+   *
+   * 默认关闭；`NODE_ENV=development` 时自动开启（见 `common/openapi/setup.ts`）。
+   * 生产环境要开必须显式设 `true`，且只放内网 —— 文档站直接挂在 express 上，
+   * **不经过 `AccessGuard`**。
+   */
+  SWAGGER_ENABLED: envBoolean(),
+  /** 文档路径（首尾斜杠会被去掉）；JSON 在 `/<path>/json`，UI 在 `/<path>` */
+  SWAGGER_PATH: z
+    .string()
+    .default('api-docs')
+    .transform((v) => v.trim()),
   DATABASE_URL: z.url(),
 
   // ─── 数据库连接池 ───────────────────────────────────────────

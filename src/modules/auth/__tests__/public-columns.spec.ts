@@ -56,7 +56,7 @@ describe('loginLogPublicColumns（登录记录对外白名单）', () => {
 });
 
 /**
- * 登录响应的用户摘要（`UserSummary`）自多角色改造起是**纯 TS 类型**：
+ * 登录响应内嵌的用户摘要是**纯 TS 类型**（不是表行投影）：
  * 角色来自 `user_roles` 关联表（`AccountService.findRoleCodes`），不是 `users` 的列，
  * 因此没有对应的 `select` 列白名单可断言 —— 这里改为冻结「认证投影不再含 role」，
  * 防止有人把单角色列又加回来（那会让多角色重新退化成单角色）。

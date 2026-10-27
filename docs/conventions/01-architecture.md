@@ -43,11 +43,19 @@ src/
 │   │   ├── failure.ts                失败摘要类型 + res.locals 键名
 │   │   ├── error-format.ts           formatError()（展开 cause 链）
 │   │   └── sanitize.ts               body 脱敏与截断
-│   └── idempotency/              #   功能：HTTP 幂等
-│       ├── idempotency.contract.ts   端口 + 键/指纹/结果类型
-│       ├── memory-store.ts           单进程内存实现（换 Postgres 只改 http-stages.ts 一行）
-│       ├── idempotency.interceptor.ts
-│       └── idempotency.decorator.ts  @Idempotent()
+│   ├── idempotency/              #   功能：HTTP 幂等
+│   │   ├── idempotency.contract.ts   端口 + 键/指纹/结果类型
+│   │   ├── memory-store.ts           单进程内存实现（换 Postgres 只改 http-stages.ts 一行）
+│   │   ├── idempotency.interceptor.ts
+│   │   └── idempotency.decorator.ts  @Idempotent()（同时声明请求头与 409）
+│   └── openapi/                  #   功能：接口文档（**启动期装配，不是请求阶段**）
+│       ├── json-schema.ts            zod → OpenAPI schema 唯一入口（清洗 + $ref 重写）
+│       ├── envelope.ts               响应信封描述（成功 / 失败）
+│       ├── parameter-doc.ts          参数文档，被 param.decorator 调用
+│       ├── route.decorator.ts        @ApiRoute（请求描述 + 响应形状，状态码由 @HttpCode/方法推导）
+│       ├── response.decorator.ts     @ApiFailure / @ApiCommonError（失败侧）
+│       ├── document.ts               buildOpenApiDocument()：paths + components
+│       └── setup.ts                  setupOpenApi()：env 闸门 + Swagger UI
 ├── config/
 │   ├── env.ts                    # 环境变量 schema（唯一声明处）+ loadEnv()（带单例缓存）
 │   ├── app-config.ts             # 业务配置（登录会话/策略 + HTTP 幂等窗口）→ APP_CONFIG provider
@@ -86,9 +94,12 @@ src/
 
 **`common/` 的分包规则是"按功能"，不是按阶段**：`auth/` 是身份与访问、`api-response/`
 是响应契约、`validation/` 是参数校验、`context/` 是请求上下文、`logging/` 是日志、
-`idempotency/` 是 HTTP 幂等。一次请求会穿过多个功能目录，穿过的方式由
-`common/http-stages.ts` 一张表回答 —— 所以**不要**把目录改成 `guards/` `interceptors/`
-`filters/` 这种按技术分层的形式：那会让"加一个功能"变成改 3 个目录。
+`idempotency/` 是 HTTP 幂等、`openapi/` 是接口文档。一次请求会穿过多个功能目录，
+穿过的方式由 `common/http-stages.ts` 一张表回答 —— 所以**不要**把目录改成 `guards/`
+`interceptors/` `filters/` 这种按技术分层的形式：那会让"加一个功能"变成改 3 个目录。
+
+`openapi/` 是唯一**不在** `http-stages.ts` 里的功能目录：它在 `createApp()` 里一次性装配
+（`setupOpenApi()`），不参与单个请求的生命周期，因此不占任何 HTTP 阶段。
 
 **模块内分包规则**（以 `modules/auth` 为准）：
 

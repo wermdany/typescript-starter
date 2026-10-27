@@ -39,17 +39,26 @@ export const userRolesSchema = z
 export const createUserSchema = z.object(
   trimmedShape({
     /** 学号（唯一） */
-    studentNo: studentNoSchema,
+    studentNo: studentNoSchema.describe('学号（登录账号，全局唯一）'),
     /** 邮箱（软删除友好唯一） */
-    email: z.email(),
+    email: z.email().describe('邮箱；软删除后可以被另一个账号重新使用'),
     /** 昵称 */
-    nickname: z.string().min(1).max(50),
+    nickname: z.string().min(1).max(50).describe('昵称，1~50 字'),
     /** 明文密码，服务端 scrypt 哈希后存储；规则与修改密码共用 */
-    password: passwordSchema,
+    password: passwordSchema.describe(
+      '明文密码；服务端 scrypt 哈希后存储，任何接口都不会返回它',
+    ),
     /** 角色集合，默认学生 */
-    roles: userRolesSchema.default(['student']),
+    roles: userRolesSchema
+      .default(['student'])
+      .describe('角色码集合，默认 ["student"]；权限取并集'),
     /** 积分，默认 0 */
-    points: z.number().int().nonnegative().default(0),
+    points: z
+      .number()
+      .int()
+      .nonnegative()
+      .default(0)
+      .describe('初始积分，默认 0'),
   }),
 );
 

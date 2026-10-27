@@ -50,6 +50,11 @@
 | 16 | `envSchema` 与 `.env.example` 一一对应 | 只改一处 | 两边同步 | `env-example-sync` 规则 |
 | 17 | 跨用户操作的准入问**权限码**，不问角色 | `isAdmin(actor)` 分支 | `mayActOnOthers(actor, 'user:delete')` | `admin-role-branch` 规则 |
 | 18 | 注释只写**当前设计与其理由**，不写功能的历史脉络 | `// 重构前是 X，现在改成 Y` / `// 这里原先写的是 …` / `// 已废弃` | `// 守卫不查库：身份由认证中间件写入` / `// 必须单事务：拆成多次往返会有竞态` | `comment-history` 规则 |
+| 19 | `dto/` 只向下依赖，**不得 import `*.service.js` / `*.controller.js`** | `import type { LoginResult } from '../login.service.js'` | 响应类型定义在 `dto/`，service 反过来 import | `dto-layer-dependency` 规则 |
+| 20 | service 不重复声明 `*Result` / `*Response` | `refresh.service.ts` 里再写一遍 `interface RefreshResult` | `export type { LoginResult as RefreshResult } from './dto/login.dto.js'` | `service-response-shape` 规则 |
+| 21 | 命名响应 schema 必须被引用 | 声明了 `.meta({ id })` 却没任何 `@ApiRoute` 用它 | 每个 schema 至少被一条路由（或另一个被引用的 schema）用到 | `orphan-schema` 规则 |
+| 22 | `dto/` 里禁止裸 `z.date()` | `createdAt: z.date()`（JSON Schema 输出 `{}`，文档丢类型） | `createdAt: dateSchema`（`shared/validation/date.ts`） | `raw-date-schema` 规则 |
+| 23 | 每个路由必须有 `@ApiRoute`，每个入参/响应字段必须有描述 | 只有 `@Get()` 没有请求说明；字段没有 `.describe()` | `@ApiRoute({ summary, description, data })` + 字段级 `.describe()` | `missing-operation-doc` 规则 + 文档生成期校验（§20.6） |
 
 ---
 
@@ -65,6 +70,7 @@
 | 环境变量、日志 | `docs/conventions/05-config-logging.md` | `pnpm typecheck` |
 | 代码风格、新增 npm script / 扫描脚本 | `docs/conventions/06-style-scripts.md` | `pnpm lint` |
 | 遇到"明明没错却不对" | `docs/conventions/07-pitfalls.md` | — |
+| 加/改接口的请求参数、响应字段、列白名单、`@ApiData` | `docs/conventions/08-contract-layers.md` | `pnpm lint`（四条契约规则） |
 
 ---
 
@@ -159,6 +165,7 @@ curl -s --max-time 3 --noproxy '*' -w '\n%{http_code}' http://localhost:8000/use
 | `docs/conventions/05-config-logging.md` | 环境变量、配置注入、日志与异常（原 §4 §10） |
 | `docs/conventions/06-style-scripts.md` | 代码风格、`scripts/` 目录约定（原 §11 §19） |
 | `docs/conventions/07-pitfalls.md` | 已知坑与反直觉行为（原 §13） |
+| `docs/conventions/08-contract-layers.md` | 契约分层：存储 / 投影 / 请求 / 响应 / 文档的派生方向与六条规则（原 §20） |
 | `docs/rbac-plan.md` | RBAC 方案与识别边界的唯一权威来源 |
 
 脚本（都支持 `--json` 与退出码 `0` 成功 / `1` 发现问题 / `2` 环境错误）：

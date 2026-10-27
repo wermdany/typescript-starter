@@ -25,9 +25,10 @@ export const changePasswordSchema = z.object(
       .min(1, { error: '请输入旧密码' })
       .max(LEGACY_PASSWORD_MAX_LENGTH, {
         error: `旧密码长度不能超过 ${LEGACY_PASSWORD_MAX_LENGTH} 位`,
-      }),
+      })
+      .describe('旧密码；仅本人改密时需要，管理员重置他人密码时忽略'),
     /** 新密码（规则见 passwordSchema） */
-    password: passwordSchema,
+    password: passwordSchema.describe('新密码，规则见 passwordSchema'),
   }),
 );
 

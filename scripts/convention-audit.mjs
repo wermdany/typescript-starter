@@ -151,6 +151,31 @@ const RULE_META = {
     title: '注释不写功能的历史脉络',
     suggest: '只写"当前怎么设计、为什么必须这样"；"重构前/原先/已废弃/本轮"这类演进叙述删掉 —— git 已经记了历史，注释只对读代码当刻的人负责',
   },
+  'dto-layer-dependency': {
+    section: '§20',
+    title: 'dto 不得反向依赖 service / controller',
+    suggest: '契约不该依赖实现：响应类型定义在 dto 里，由 service 反过来 import（见 08-contract-layers.md R1）',
+  },
+  'service-response-shape': {
+    section: '§20',
+    title: 'service 不重复声明 *Result / *Response',
+    suggest: '响应形状归 dto：改成 `export type { LoginResult as RefreshResult } from \'./dto/xxx.dto.js\'`（R3）',
+  },
+  'raw-date-schema': {
+    section: '§20',
+    title: 'dto 里禁止裸 z.date()',
+    suggest: '`z.date()` 在 JSON Schema 里输出 `{}`，文档会丢掉时间类型；改用 `dateSchema`（R5）',
+  },
+  'orphan-schema': {
+    section: '§20',
+    title: '命名响应 schema 必须被引用',
+    suggest: '声明了 `.meta({ id })` 却没有 `@ApiData` 用它，不会进 components —— 文档里看不到，也没人报错（R6）',
+  },
+  'missing-operation-doc': {
+    section: '§20',
+    title: '每个路由都要有 @ApiRoute（请求描述 + 响应形状）',
+    suggest: '在每个 handler 上加 `@ApiRoute({ summary, description, data })`；缺了 Swagger 里只有一行 METHOD /path，看不出这个接口做什么、返回什么',
+  },
 };
 
 const RULE_IDS = Object.keys(RULE_META);
@@ -184,6 +209,7 @@ async function runAudit(options) {
 
   const files = await collectTypeScriptFiles(absoluteRoot);
   const findings = [];
+  const sourceTexts = new Map();
 
   await collectEnvExampleFindings(cwd, options, findings);
 
@@ -192,12 +218,16 @@ async function runAudit(options) {
     collectFilenameFindings(relativePath, options, findings);
 
     const sourceText = await fs.readFile(filePath, 'utf8');
+    sourceTexts.set(relativePath, sourceText);
     const sourceFile = ts.createSourceFile(filePath, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
     assertParseSucceeded(sourceFile, relativePath);
 
     collectTextFindings(sourceText, relativePath, options, findings);
     collectAstFindings(sourceFile, relativePath, options, findings);
   }
+
+  // 跨文件判定：命名 schema 是否真的有人用（单文件视角看不出来）
+  collectSchemaReferenceFindings(sourceTexts, options, findings);
 
   findings.sort((a, b) => (a.file === b.file ? a.line - b.line : a.file < b.file ? -1 : 1));
 
@@ -463,6 +493,98 @@ function collectTextFindings(sourceText, file, options, findings) {
       addFinding(findings, options, 'process-env', file, lineNumber, `直读环境变量：${matched.trim()}`);
     });
   }
+
+  // 响应形状归 dto（§20 R3）：service 里出现 `export interface XxxResult` = 抄了第二份
+  if (file.endsWith('.service.ts')) {
+    findRegexMatches(lines, /^\s*export\s+interface\s+\w*(?:Result|Response)\b/, (lineNumber, matched) => {
+      addFinding(findings, options, 'service-response-shape', file, lineNumber, `service 重复声明响应形状：${matched.trim()}`);
+    });
+  }
+
+  // 每个路由必须有请求描述（§20 R7）：文档校验只在乎"生成出来有没有"，
+  // 这条规则在乎"源码里写没写" —— 关掉文档时也能拦住
+  if (file.endsWith('.controller.ts')) {
+    const routeCount = lines.filter((line) => /^\s*@(Get|Post|Put|Patch|Delete|Options|Head)\(/.test(line)).length;
+    const docCount = lines.filter((line) => /^\s*@ApiRoute\(/.test(line)).length;
+    if (routeCount !== docCount) {
+      addFinding(
+        findings,
+        options,
+        'missing-operation-doc',
+        file,
+        1,
+        `路由 ${routeCount} 条，@ApiRoute ${docCount} 条`,
+      );
+    }
+  }
+
+  // 裸 z.date() 在 JSON Schema 里输出 `{}`（§20 R5）
+  if (file.endsWith('.dto.ts')) {
+    findRegexMatches(lines, /\bz\s*\.\s*date\s*\(\s*\)/, (lineNumber) => {
+      addFinding(findings, options, 'raw-date-schema', file, lineNumber, '裸 z.date() 在 OpenAPI 里输出 `{}`，改用 dateSchema');
+    });
+  }
+}
+
+/** 命名 schema 的声明：`export const xxxSchema = …` / `export const xxxSchema: z.ZodType<T> = …` */
+const NAMED_SCHEMA_DECL_RE = /^\s*export const \w+[^=]*=/;
+
+/** `.meta({ id: … })`：判断上面那条声明是否"给自己起了名字"，也就是会进 components */
+const NAMED_SCHEMA_META_RE = /\.meta\(\s*\{[^}]*\bid\s*:/;
+
+/**
+ * 跨文件检查：命名 schema 必须至少被引用一次（§20 R6）。
+ *
+ * 只看"名字在全部文件里出现几次"。出现 1 次 = 只有声明本身，没有任何 `@ApiData`
+ * 或另一个 schema 用到它 —— 而没人引用的 schema **不会进 components**，
+ * 文档里静默缺失。这类失效 typecheck / lint 都不会响，只能靠这条规则。
+ */
+function collectSchemaReferenceFindings(sourceTexts, options, findings) {
+  if (!enabled(options, 'orphan-schema')) {
+    return;
+  }
+
+  const declarations = [];
+  for (const [file, text] of sourceTexts) {
+    if (!file.endsWith('.dto.ts')) {
+      continue;
+    }
+    const lines = text.split('\n');
+    lines.forEach((line, index) => {
+      const matched = NAMED_SCHEMA_DECL_RE.exec(line);
+      if (!matched) {
+        return;
+      }
+      // `.meta({ id })` 通常写在链式调用的末尾，往下看一段；同时用它排除
+      // 请求侧的 schema（那些本来就没有命名，也不会进 components）
+      const block = lines.slice(index, index + 20).join('\n');
+      if (!NAMED_SCHEMA_META_RE.test(block)) {
+        return;
+      }
+      const name = /export const (\w+)/.exec(line)?.[1];
+      if (name) {
+        declarations.push({ file, line: index + 1, name });
+      }
+    });
+  }
+
+  for (const { file, line, name } of declarations) {
+    const pattern = new RegExp(`\\b${name}\\b`, 'g');
+    let occurrences = 0;
+    for (const text of sourceTexts.values()) {
+      occurrences += (text.match(pattern) ?? []).length;
+    }
+    if (occurrences <= 1) {
+      addFinding(
+        findings,
+        options,
+        'orphan-schema',
+        file,
+        line,
+        `${name} 声明了 .meta({ id }) 但没有任何引用 —— 不会被写进 components`,
+      );
+    }
+  }
 }
 
 function findRegexMatches(lines, regex, onMatch) {
@@ -508,6 +630,10 @@ function checkImportSpecifier(node, sourceFile, file, options, findings) {
   }
   if (specifier.includes('../../')) {
     addFinding(findings, options, 'cross-dir-relative', file, line, `跨目录相对导入：${specifier}`);
+  }
+  // 契约层（dto/）只能向下依赖：出现 service / controller 说明依赖方向反了
+  if (file.endsWith('.dto.ts') && /\.(service|controller)\.js$/.test(specifier)) {
+    addFinding(findings, options, 'dto-layer-dependency', file, line, `dto 反向依赖实现层：${specifier}`);
   }
 }
 

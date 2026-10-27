@@ -18,7 +18,7 @@ export const idParamSchema = trimmed(
     .regex(/^\d+$/, { error: 'ID 必须是正整数' })
     .transform(Number)
     .pipe(z.number().int().positive()),
-);
+).describe('资源 ID（正整数）');
 
 export type IdParam = z.infer<typeof idParamSchema>;
 
@@ -27,6 +27,6 @@ export type IdParam = z.infer<typeof idParamSchema>;
  *
  * 长度约束前置后，超长学号报 400，而不是触发 PG `22001` 冒泡成 500。
  */
-export const studentNoParamSchema = trimmed(studentNoSchema);
+export const studentNoParamSchema = trimmed(studentNoSchema).describe('学号');
 
 export type StudentNoParam = z.infer<typeof studentNoParamSchema>;

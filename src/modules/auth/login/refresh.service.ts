@@ -7,19 +7,9 @@ import type { ClientContext } from './client-context.js';
 import { LoginLogService } from '@/modules/auth/log/login-log.service.js';
 import { SessionService } from '@/modules/auth/session/session.service.js';
 import { TokenService } from '@/modules/auth/token/token.service.js';
-import type { UserSummary } from './dto/user.dto.js';
+import type { LoginResult } from './dto/login.dto.js';
 
-/** 续期结果：与登录响应同形，前端直接整体替换本地 token */
-export interface RefreshResult {
-  accessToken: string;
-  refreshToken: string;
-  tokenType: 'Bearer';
-  expiresAt: Date;
-  expiresIn: number;
-  refreshTokenExpiresAt: Date;
-  refreshWindowSeconds: number;
-  user: UserSummary;
-}
+/** 续期结果：与登录响应同形（`LoginResult`），前端直接整体替换本地 token */
 
 /**
  * 续期用例（refreshToken 一次性轮换 + 重放检测）。
@@ -46,7 +36,7 @@ export class RefreshService {
   async execute(
     refreshToken: string,
     client: ClientContext,
-  ): Promise<RefreshResult> {
+  ): Promise<LoginResult> {
     const refreshTokenHash = this.tokens.hashRefreshToken(refreshToken);
     const session = await this.sessions.findByRefreshHash(refreshTokenHash);
 

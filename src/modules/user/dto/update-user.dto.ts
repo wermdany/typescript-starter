@@ -24,10 +24,20 @@ import { userRolesSchema } from './create-user.dto.js';
 export const updateUserSchema = z
   .object(
     trimmedShape({
-      email: z.email().optional(),
-      nickname: z.string().min(1).max(50).optional(),
-      roles: userRolesSchema.optional(),
-      points: z.number().int().nonnegative().optional(),
+      email: z
+        .email()
+        .optional()
+        .describe('邮箱；软删除后可以被另一个账号重新使用'),
+      nickname: z.string().min(1).max(50).optional().describe('昵称，1~50 字'),
+      roles: userRolesSchema
+        .optional()
+        .describe('角色码集合（整体替换语义，不是增量）；仅管理员可改'),
+      points: z
+        .number()
+        .int()
+        .nonnegative()
+        .optional()
+        .describe('积分，不得为负；仅管理员可改'),
     }),
   )
   .refine((v) => Object.values(v).some((value) => value !== undefined), {

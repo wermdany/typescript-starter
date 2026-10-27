@@ -20,26 +20,7 @@ import type { ClientContext } from './client-context.js';
 import { LoginLogService } from '@/modules/auth/log/login-log.service.js';
 import { SessionService } from '@/modules/auth/session/session.service.js';
 import { TokenService } from '@/modules/auth/token/token.service.js';
-import type { UserSummary } from './dto/user.dto.js';
-
-/**
- * 登录成功后的结果。
- *
- * `refreshToken` **只出现在这里**（controller 要用它 Set-Cookie），响应体里不返回 ——
- * Cookie 方案下前端永远接触不到 RT 明文。
- */
-export interface LoginResult {
-  /** 请求头用的短命 token（响应体返回） */
-  accessToken: string;
-  /** 长命 token（**只进 HttpOnly Cookie**，不进响应体） */
-  refreshToken: string;
-  tokenType: 'Bearer';
-  expiresAt: Date;
-  expiresIn: number;
-  refreshTokenExpiresAt: Date;
-  refreshWindowSeconds: number;
-  user: UserSummary;
-}
+import type { LoginResult } from './dto/login.dto.js';
 
 /** 登录入参 */
 export interface LoginCommand {
