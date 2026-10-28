@@ -30,9 +30,8 @@ import {
 import {
   FORBIDDEN_MESSAGE,
   PERMISSION_CHECKER,
-  WILDCARD_PERMISSION,
   assertOwnership,
-  isSystemActor,
+  holdsPermission,
   type Actor,
   type PermissionChecker,
   type PermissionCode,
@@ -82,16 +81,14 @@ export class UserService {
    * 重置密码"的角色就只能改业务代码。角色只是权限码的载体 —— 授权关系在数据库里改，
    * 业务代码不动。
    *
-   * 系统身份（`systemActor`）直接放行：它不持有任何角色，按 §17 的约定 `ownsResource` 恒为真。
-   * 通配码 `*` 与其它码同等处理，与路由守卫的判定保持一致。
+   * 判定实现在 `shared/auth/permission.ts`：文件模块用的是同一份，
+   * 免得两个 service 各写一遍、日后悄悄漂移成权限漏洞。
    */
-  private async mayActOnOthers(
+  private mayActOnOthers(
     actor: Actor,
     code: PermissionCode,
   ): Promise<boolean> {
-    if (isSystemActor(actor)) return true;
-    const granted = await this.permissions.resolveCodes(actor);
-    return granted.has(WILDCARD_PERMISSION) || granted.has(code);
+    return holdsPermission(this.permissions, actor, code);
   }
 
   /** 创建用户（哈希在 DB 操作之前计算，不占用连接） */

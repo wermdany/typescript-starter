@@ -3,7 +3,9 @@ import { Module } from '@nestjs/common';
 import { ConfigProviderModule } from './config/config.module.js';
 import { DatabaseModule } from '@/database/database.module.js';
 import { HttpStagesModule } from '@/common/http-stages.module.js';
+import { StorageModule } from '@/common/storage/storage.module.js';
 import { AuthModule } from '@/modules/auth/auth.module.js';
+import { FileModule } from '@/modules/file/file.module.js';
 import { RbacModule } from '@/modules/rbac/rbac.module.js';
 import { UserModule } from '@/modules/user/user.module.js';
 
@@ -27,8 +29,11 @@ import { UserModule } from '@/modules/user/user.module.js';
     // 权限码解析（@Global）：AccessGuard 通过 PERMISSION_CHECKER 端口注入
     RbacModule,
     DatabaseModule,
+    // 文件存储（@Global）：业务只注入 STORAGE 端口，实现由 storage.module.ts 一行决定
+    StorageModule,
     AuthModule,
     UserModule,
+    FileModule,
   ],
 })
 export class AppModule {}

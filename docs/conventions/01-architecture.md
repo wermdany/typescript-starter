@@ -48,6 +48,10 @@ src/
 │   │   ├── memory-store.ts           单进程内存实现（换 Postgres 只改 http-stages.ts 一行）
 │   │   ├── idempotency.interceptor.ts
 │   │   └── idempotency.decorator.ts  @Idempotent()（同时声明请求头与 409）
+│   ├── storage/                  #   功能：文件存储（**不在** http-stages.ts 里）
+│   │   ├── storage.contract.ts       StoragePort 端口 + 流/重定向判别联合 + key 规则
+│   │   ├── local-storage.ts          本地磁盘实现（FILE_STORAGE_DIR）
+│   │   └── storage.module.ts         装配处：STORAGE token → 实现（换 OSS 只改一行）
 │   └── openapi/                  #   功能：接口文档（**启动期装配，不是请求阶段**）
 │       ├── json-schema.ts            zod → OpenAPI schema 唯一入口（清洗 + $ref 重写）
 │       ├── envelope.ts               响应信封描述（成功 / 失败）
@@ -78,8 +82,9 @@ src/
 │   ├── process-error.ts          #   uncaughtException / unhandledRejection 兜底
 │   └── __tests__/
 ├── startup/local-addresses.ts    # 启动时枚举可访问地址
-└── modules/<domain>/             # 业务模块（当前有 user、auth、rbac）
+└── modules/<domain>/             # 业务模块（当前有 user、auth、rbac、file）
                                   #   rbac 是基础设施：只提供权限码解析（不再是守卫注册处）
+                                  #   file 只认 STORAGE 端口，实现由 common/storage 决定
     ├── <domain>.module.ts
     ├── <domain>.controller.ts
     ├── <domain>.service.ts       # 或按用例拆成多个 XxxService
@@ -100,6 +105,8 @@ src/
 
 `openapi/` 是唯一**不在** `http-stages.ts` 里的功能目录：它在 `createApp()` 里一次性装配
 （`setupOpenApi()`），不参与单个请求的生命周期，因此不占任何 HTTP 阶段。
+`storage/` 同理不在阶段表里 —— 它不是请求阶段组件，而是一个可替换的基础设施依赖，
+装配点是 `storage/storage.module.ts`（换存储实现 = 改那里的 `useClass` 一行）。
 
 **模块内分包规则**（以 `modules/auth` 为准）：
 

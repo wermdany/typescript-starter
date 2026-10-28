@@ -47,6 +47,21 @@ export const envSchema = z.object({
   /** 是否把请求体写进日志（脱敏 + 截断），默认关闭；只接受 true/false（其余值报错） */
   LOG_BODY: envBoolean(),
 
+  // ─── 文件存储 ─────────────────────────────────────────────
+  /**
+   * 上传文件的落盘根目录（相对路径按进程 cwd 解析）。
+   *
+   * 只有本地存储实现（`common/storage/local-storage.ts`）读它；换成对象存储后
+   * 这个值不再生效，但配置项保留 —— 换回本地实现（如测试环境）不需要改代码。
+   * 业务侧的上传策略（大小上限、允许的类型）在 `modules/file/upload-policy.ts`，
+   * 那些不随部署环境变化，因此不走环境变量。
+   */
+  FILE_STORAGE_DIR: z
+    .string()
+    .default('files')
+    .transform((v) => v.trim())
+    .pipe(z.string().min(1)),
+
   // ─── 接口文档 ─────────────────────────────────────────────
   /**
    * 是否挂载 OpenAPI 文档（`/<SWAGGER_PATH>`）。

@@ -50,6 +50,13 @@
       "when": 1792589830782,
       "tag": "0006_drop_users_role",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793105881382,
+      "tag": "0007_oval_madripoor",
+      "breakpoints": true
     }
   ]
 }

@@ -8,6 +8,9 @@
 /logs
 *.log
 
+# 上传文件（本地存储的落盘目录，FILE_STORAGE_DIR）
+/files
+
 # compiled output
 /dist
 /tmp

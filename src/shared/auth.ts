@@ -21,6 +21,7 @@ export {
   OWNERSHIP_DENIED_MESSAGE,
   assertOwnership,
 } from '@/shared/auth/ownership.js';
+export { holdsPermission } from '@/shared/auth/permission.js';
 export {
   SYSTEM_ACTOR_ID,
   actorIdOf,

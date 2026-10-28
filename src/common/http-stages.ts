@@ -21,7 +21,7 @@ import { RequestLoggingInterceptor } from '@/common/logging/request-logging.inte
  *
  * ## 分层不变式（新增 `common/*` 代码前先读这里）
  *
- * `common/{auth,api-response,validation,context,logging,idempotency}/*` 允许依赖
+ * `common/{auth,api-response,validation,context,logging,idempotency,storage}/*` 允许依赖
  * `@nestjs/*`、express、zod、rxjs 与 Node 内置模块；
  * **禁止** import `@/modules/*`、`@/logger/*`、`@/shared/*`、`@/database/*`。
  * 理由：`common` 是被所有业务模块使用的横切层，一旦反向依赖业务代码，
