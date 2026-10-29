@@ -89,6 +89,8 @@ describe('envSchema / 连接池与认证变量', () => {
         [
           'DATABASE_URL',
           'DB_POOL_MAX',
+          // 文件存储落盘根目录（仅本地存储实现读取）
+          'FILE_STORAGE_DIR',
           'LOG_BODY',
           'LOG_FILE',
           'LOG_LEVEL',
@@ -96,6 +98,9 @@ describe('envSchema / 连接池与认证变量', () => {
           'PORT',
           // RBAC：「角色 → 权限码」缓存有效期（默认 60s）
           'RBAC_CACHE_TTL_SECONDS',
+          // 接口文档开关与路径
+          'SWAGGER_ENABLED',
+          'SWAGGER_PATH',
         ].sort(),
       );
     }

@@ -328,11 +328,14 @@ describe('queryUsersSchema：schema 自身严格，宽容由 query 管道提供'
     );
   });
 
-  it('枚举值非法仍拒绝（teacher 已是合法角色，root 不在枚举里）', () => {
+  it('角色码只校验形状，不校验是否为内置角色', () => {
     expect(queryUsersSchema.parse({ role: 'teacher' }).role).toBe('teacher');
-    expect(expectFail(queryUsersSchema, { role: 'root' })[0]?.path).toBe(
-      'role',
-    );
+    // 'root' 形状合法就通过：某个码是否已配置由 service 查库回答（409），
+    // 这里报 400 会变成"数据没配好却责怪请求方"
+    expect(queryUsersSchema.parse({ role: 'root' }).role).toBe('root');
+    // 真正被拒的是形状：大写开头、含空格
+    expect(expectFail(queryUsersSchema, { role: 'Root' })[0]?.path).toBe('role');
+    expect(expectFail(queryUsersSchema, { role: 'a b' })[0]?.path).toBe('role');
   });
 });
 
