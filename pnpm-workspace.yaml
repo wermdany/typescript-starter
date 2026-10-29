@@ -1,3 +1,5 @@
+# 只放"随仓库走"的 pnpm 配置。
+# 不要写 storeDir 之类的绝对路径：那是本机路径，CI（ubuntu）上会变成非法路径，
+# 让 pnpm install 在第一步就失败。需要自定义 store 请写进本地 ~/.npmrc。
 allowBuilds:
   esbuild: true
-storeDir: /Users/wermdany/Library/pnpm/store/v11

@@ -55,6 +55,7 @@
 | 21 | 命名响应 schema 必须被引用 | 声明了 `.meta({ id })` 却没任何 `@ApiRoute` 用它 | 每个 schema 至少被一条路由（或另一个被引用的 schema）用到 | `orphan-schema` 规则 |
 | 22 | `dto/` 里禁止裸 `z.date()` | `createdAt: z.date()`（JSON Schema 输出 `{}`，文档丢类型） | `createdAt: dateSchema`（`shared/validation/date.ts`） | `raw-date-schema` 规则 |
 | 23 | 每个路由必须有 `@ApiRoute`，每个入参/响应字段必须有描述 | 只有 `@Get()` 没有请求说明；字段没有 `.describe()` | `@ApiRoute({ summary, description, data })` + 字段级 `.describe()` | `missing-operation-doc` 规则 + 文档生成期校验（§20.6） |
+| 24 | 日常开发不跑单元测试 / e2e / 构建，这三件事由 CI 负责 | 本地 `pnpm test` / `pnpm test:e2e` / `pnpm build` | `pnpm verify` + 目标 curl；要看回归结果看 PR 上的 `ci` 检查 | `scripts/test-guard.mjs`（`pretest` 钩子拦截，退出码 2） |
 
 ---
 
@@ -71,6 +72,7 @@
 | 代码风格、新增 npm script / 扫描脚本 | `docs/conventions/06-style-scripts.md` | `pnpm lint` |
 | 遇到"明明没错却不对" | `docs/conventions/07-pitfalls.md` | — |
 | 加/改接口的请求参数、响应字段、列白名单、`@ApiData` | `docs/conventions/08-contract-layers.md` | `pnpm lint`（四条契约规则） |
+| 改 CI、测试入口、`test` / `build` 该在哪跑 | `docs/conventions/09-ci.md` | `pnpm verify`（工作流本身只能靠 PR 结果验） |
 
 ---
 
@@ -85,7 +87,7 @@
 | 动 DTO / 响应字段 | 上述 + 目标 curl（400 带 `errors`、404、409） | 顺带确认无 `passwordHash` / `deletedAt` |
 | 动 schema | `pnpm db:generate` + 人工看迁移 SQL | 开发期可 `pnpm db:push` |
 | 动配置 / 日志 | `pnpm typecheck` + 查 `logs/app.log` | 见 `05-config-logging.md` |
-| 发版或 CI | 追加 `pnpm build` + `pnpm test` | 日常开发**不要**跑 `pnpm build` |
+| 发版 / 要看回归结果 | 交给 CI：`build` + `test` + `e2e` | 日常开发**不要**跑 `pnpm build` / `pnpm test` |
 
 一次性跑全套：`pnpm verify`（= `typecheck` + `lint` + `perm:audit`）。
 
@@ -98,12 +100,18 @@ pnpm perm:audit     # 路由权限标注审计，非零退出码
 pnpm verify         # 上面三条串起来
 pnpm dev:probe      # 开发服务器状态（只读，不重启）
 pnpm build          # 只在发版/CI 跑：会动 dist/，可能干扰 watch 进程
+pnpm test           # 只在 CI 跑：本地会被 scripts/test-guard.mjs 拦下
+pnpm test:e2e       # 同上，且需要真实库
 ```
 
 **新增依赖必须由用户本人执行安装**（AI 只改 `package.json` / 给出安装命令，不运行 `pnpm add`）。
 
 **单轮对话内完成的需求，不写单元测试也不跑测试**（无论过程中是否已写过测试代码）——
 只做上表的验证。例外：用户明确要求写测试或跑测试时；跨多轮的大需求明示"做完整方案/全部测试"时。
+
+**测试的默认执行者是 CI，不是本地**：`test` / `test:e2e` / `build` 在 PR 上跑，本地只认
+`verify` + curl。误跑会被 `scripts/test-guard.mjs` 拦下（退出码 2）；改测试本身确需本地跑时用
+`TEST_ALLOW_LOCAL=1 pnpm test`。流水线结构与排查顺序见 `docs/conventions/09-ci.md`。
 
 ---
 
@@ -170,6 +178,7 @@ curl -s --max-time 3 --noproxy '*' -w '\n%{http_code}' http://localhost:8000/hea
 | `docs/conventions/06-style-scripts.md` | 代码风格、`scripts/` 目录约定（原 §11 §19） |
 | `docs/conventions/07-pitfalls.md` | 已知坑与反直觉行为（原 §13） |
 | `docs/conventions/08-contract-layers.md` | 契约分层：存储 / 投影 / 请求 / 响应 / 文档的派生方向与六条规则（原 §20） |
+| `docs/conventions/09-ci.md` | CI 与测试策略：本地 / CI 的命令分工、守卫机制、流水线结构、失败排查顺序 |
 | `docs/rbac-plan.md` | RBAC 方案与识别边界的唯一权威来源 |
 
 脚本（都支持 `--json` 与退出码 `0` 成功 / `1` 发现问题 / `2` 环境错误）：
@@ -180,3 +189,4 @@ curl -s --max-time 3 --noproxy '*' -w '\n%{http_code}' http://localhost:8000/hea
 | `scripts/permission-audit.mjs` | 路由权限标注审计（`pnpm perm:audit`） |
 | `scripts/sync-permissions.mjs` | 权限码同步进数据库（`pnpm perm:sync`） |
 | `scripts/dev-probe.mjs` | 开发服务器状态探针（`pnpm dev:probe`） |
+| `scripts/test-guard.mjs` | 测试入口守卫：非 CI 环境拦截 `test` / `test:cov` / `test:e2e`（红线 #24） |

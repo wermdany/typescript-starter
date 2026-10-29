@@ -1,0 +1,126 @@
+# CI：把"日常开发不该做的事"从本地挪到合并前。
+#
+# 分工是刻意的：
+#   - 本地（人 + AI）只跑 pnpm verify 与目标 curl，几十秒内出结果
+#   - CI 跑构建、单元测试、e2e、迁移可执行性 —— 这些慢、且与"这次改动是否成立"
+#     无关的东西，只在 push / PR 时跑一次
+#
+# 本地误跑测试会被 scripts/test-guard.mjs 拦住（pretest 钩子），
+# 规则与例外见 docs/conventions/09-ci.md。
+
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+# 同一分支的新提交顶掉旧运行，避免 PR 上排一长串过期流水线
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # 配置在启动期就是 fail-fast 的，任何 import 了 env 的环节都要求这个变量存在。
+  # 静态检查与构建并不连库，这里给一个形状合法的占位值即可；
+  # test job 会覆盖成 service 容器里的真实地址。
+  DATABASE_URL: postgresql://test:test@localhost:5432/test
+
+jobs:
+  verify:
+    name: verify (typecheck / lint / perm:audit / build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      # = typecheck + lint（含 convention-audit 20 条）+ perm:audit
+      - name: 静态检查与规范审计
+        run: pnpm verify
+
+      # 只在 CI 跑：本地会动 dist/ 并干扰 watch 进程
+      - name: 构建
+        run: pnpm build
+
+  test:
+    name: test (unit + e2e)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      # 与 vitest.config.e2e.ts 的占位值一致，e2e 直接复用这个真库
+      DATABASE_URL: postgresql://test:test@localhost:5432/test
+      # 测试进程不落日志文件、不写仓库目录
+      LOG_FILE: ''
+      FILE_STORAGE_DIR: tmp/files
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      # 顺带验证 drizzle/ 里的 SQL 能在干净库上跑通 —— 迁移坏了要比测试失败更早暴露
+      - name: 应用迁移（干净库）
+        run: pnpm db:migrate
+
+      - name: 单元测试
+        run: pnpm test
+
+      # 目前没有 e2e 用例：--passWithNoTests 让"还没写"表现为跳过而不是红灯
+      - name: e2e 测试
+        run: pnpm test:e2e --passWithNoTests
+
+  # 汇总闸门：分支保护只需要勾这一个检查项，之后加/拆 job 都不用改设置
+  ci:
+    name: ci
+    if: always()
+    needs: [verify, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 汇总上游结果
+        run: |
+          echo "verify=${{ needs.verify.result }} test=${{ needs.test.result }}"
+          if [ "${{ needs.verify.result }}" != "success" ] || [ "${{ needs.test.result }}" != "success" ]; then
+            echo "上游 job 未全部成功，CI 判定为失败"
+            exit 1
+          fi

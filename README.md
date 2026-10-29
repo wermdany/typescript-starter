@@ -54,12 +54,17 @@ pnpm start:dev        # 开发模式（watch）
 pnpm start:debug      # 调试模式（watch + 9229 端口）
 pnpm start:prod       # 运行 dist/main
 
-pnpm build            # 编译
-pnpm lint             # oxlint src/
+pnpm build            # 编译（CI 执行，本地跑会干扰 watch 进程）
+pnpm typecheck        # tsc --noEmit
+pnpm lint             # oxlint src/ + 规范审计（scripts/convention-audit.mjs）
+pnpm perm:audit       # 路由权限标注审计
+pnpm verify           # 上面三条串起来，日常验证入口
 pnpm format           # prettier
-pnpm test             # 单元测试
-pnpm test:watch       # 单元测试 watch
-pnpm test:cov         # 覆盖率
+
+pnpm test             # 单元测试（只在 CI 跑，本地会被 scripts/test-guard.mjs 拦截）
+pnpm test:e2e         # e2e（同上）
+pnpm test:watch       # 单元测试 watch（改测试本身时用）
+pnpm test:cov         # 覆盖率（只在 CI 跑）
 
 pnpm db:push          # 把 schema 推到数据库
 pnpm db:generate      # 生成迁移 SQL 到 drizzle/
