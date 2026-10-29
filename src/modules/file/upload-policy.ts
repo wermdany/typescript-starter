@@ -51,10 +51,16 @@ export interface UploadRule {
   readonly signatureGroups?: readonly (readonly Signature[])[];
 }
 
-/** 常见容器格式的签名（同一签名同时覆盖 zip 与 docx/xlsx/pptx） */
-const ZIP_SIGNATURES: readonly Signature[] = [
-  { offset: 0, bytes: [0x50, 0x4b, 0x03, 0x04] },
-  { offset: 0, bytes: [0x50, 0x4b, 0x05, 0x06] },
+/**
+ * 常见容器格式的签名（同一签名同时覆盖 zip 与 docx/xlsx/pptx）。
+ *
+ * 两个签名是**互斥的两种开头**（普通档案 `PK\x03\x04` / 空档案 `PK\x05\x06`），
+ * 因此必须是**两个组**（组间 OR），不能放进同一组（组内 AND 要求两者同时命中，
+ * 而 offset 0 处不可能同时是 03 和 05 —— 那会让所有 zip 家族的上传都 415）。
+ */
+const ZIP_SIGNATURE_GROUPS: readonly (readonly Signature[])[] = [
+  [{ offset: 0, bytes: [0x50, 0x4b, 0x03, 0x04] }],
+  [{ offset: 0, bytes: [0x50, 0x4b, 0x05, 0x06] }],
 ];
 
 /**
@@ -104,25 +110,25 @@ export const UPLOAD_RULES: readonly UploadRule[] = [
   {
     mimeType: 'application/zip',
     extension: 'zip',
-    signatureGroups: [ZIP_SIGNATURES],
+    signatureGroups: ZIP_SIGNATURE_GROUPS,
   },
   {
     mimeType:
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     extension: 'docx',
-    signatureGroups: [ZIP_SIGNATURES],
+    signatureGroups: ZIP_SIGNATURE_GROUPS,
   },
   {
     mimeType:
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     extension: 'xlsx',
-    signatureGroups: [ZIP_SIGNATURES],
+    signatureGroups: ZIP_SIGNATURE_GROUPS,
   },
   {
     mimeType:
       'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     extension: 'pptx',
-    signatureGroups: [ZIP_SIGNATURES],
+    signatureGroups: ZIP_SIGNATURE_GROUPS,
   },
 ];
 
