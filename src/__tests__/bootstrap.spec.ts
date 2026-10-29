@@ -88,6 +88,9 @@ vi.mock('@/database/database.service.js', () => ({
         set: () => ({ where: () => ({ returning: async () => [] }) }),
       }),
     };
+
+    /** 就绪检查探活：假库恒可用（真实失败分支由 health.service 的单测覆盖） */
+    async ping(): Promise<void> {}
   },
 }));
 
@@ -117,11 +120,23 @@ afterAll(async () => {
 });
 
 describe('应用启动与全局 HTTP 生命周期', () => {
-  it('公开路由：健康检查不需要登录', async () => {
-    const res = await request(app.getHttpServer()).get('/users/health');
+  it('公开路由：存活检查不需要登录', async () => {
+    const res = await request(app.getHttpServer()).get('/health');
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ success: true, message: 'ok' });
+  });
+
+  // 假库的 `ping()` 恒成功，因此这里断言的是"路由通了且经过统一契约"；
+  // 数据库不可达 → 503 的分支由 `health.service` 的单元测试覆盖
+  it('公开路由：就绪检查挂在根上，探活成功返回 ok', async () => {
+    const res = await request(app.getHttpServer()).get('/health/ready');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      success: true,
+      data: { status: 'ok', database: 'ok' },
+    });
   });
 
   it('受保护路由无 token → 401（守卫拦截，过滤器产出失败契约）', async () => {

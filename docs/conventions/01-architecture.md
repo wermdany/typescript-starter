@@ -82,9 +82,10 @@ src/
 │   ├── process-error.ts          #   uncaughtException / unhandledRejection 兜底
 │   └── __tests__/
 ├── startup/local-addresses.ts    # 启动时枚举可访问地址
-└── modules/<domain>/             # 业务模块（当前有 user、auth、rbac、file）
+└── modules/<domain>/             # 业务模块（当前有 user、auth、rbac、file、health）
                                   #   rbac 是基础设施：只提供权限码解析（不再是守卫注册处）
                                   #   file 只认 STORAGE 端口，实现由 common/storage 决定
+                                  #   health 是运维端点（/health、/health/ready），不属于任何业务域
     ├── <domain>.module.ts
     ├── <domain>.controller.ts
     ├── <domain>.service.ts       # 或按用例拆成多个 XxxService

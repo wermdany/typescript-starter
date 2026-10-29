@@ -98,9 +98,4 @@ export const userPageSchema = pageOf(userResponseSchema).meta({
   id: 'UserResponsePage',
 });
 
-/** 健康检查响应（`GET /users/health`） */
-export const healthStatusSchema = z
-  .object({ status: z.literal('ok').describe('固定为 ok；能拿到它就说明进程与路由都活着') })
-  .meta({ id: 'HealthStatus' });
-
 

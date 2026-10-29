@@ -120,8 +120,12 @@ pnpm build          # 只在发版/CI 跑：会动 dist/，可能干扰 watch �
 ```bash
 pnpm dev:probe                  # 端口 / pid / 产物新旧 / 日志尾行，一次给全
 pnpm dev:probe --json           # 供脚本解析
-curl -s --max-time 3 --noproxy '*' -w '\n%{http_code}' http://localhost:8000/users?pageSize=1
+curl -s --max-time 3 --noproxy '*' -w '\n%{http_code}' http://localhost:8000/health
 ```
+
+探活走 `GET /health`（存活检查）：公开、零 I/O、不碰数据库 —— 200 只说明"进程与路由活着"，
+与库是否可用解耦。需要连库一起验时用 `GET /health/ready`（不可达 503），
+不要再用业务路由（如 `/users`）嗅探：它要鉴权，401 与"服务没起"难以区分。
 
 ### 止损红线
 

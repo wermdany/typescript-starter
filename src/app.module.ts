@@ -6,6 +6,7 @@ import { HttpStagesModule } from '@/common/http-stages.module.js';
 import { StorageModule } from '@/common/storage/storage.module.js';
 import { AuthModule } from '@/modules/auth/auth.module.js';
 import { FileModule } from '@/modules/file/file.module.js';
+import { HealthModule } from '@/modules/health/health.module.js';
 import { RbacAdminModule } from '@/modules/rbac/rbac-admin.module.js';
 import { RbacModule } from '@/modules/rbac/rbac.module.js';
 import { UserModule } from '@/modules/user/user.module.js';
@@ -37,6 +38,8 @@ import { UserModule } from '@/modules/user/user.module.js';
     AuthModule,
     UserModule,
     FileModule,
+    // 运维端点（/health、/health/ready）：与业务域无关，维护模式下也应当可用
+    HealthModule,
   ],
 })
 export class AppModule {}

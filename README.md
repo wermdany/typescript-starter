@@ -89,7 +89,8 @@ pnpm db:studio        # 可视化查看数据
 | `DELETE` | `/auth/sessions/:id` | 登录 | 踢掉我的某台设备 |
 | `GET` | `/auth/login-logs` | 登录 | 我的登录记录 |
 | `GET` | `/auth/me` | 登录 | 当前身份 |
-| `GET` | `/users/health` | 公开 | 健康检查 |
+| `GET` | `/health` | 公开 | 存活检查（不探依赖，失败才该重启） |
+| `GET` | `/health/ready` | 公开 | 就绪检查（`SELECT 1` 探库，不可达 503） |
 | `GET` | `/users/me` | 登录 | 当前用户资料 |
 | `POST` | `/users` | 管理员 | 创建用户 |
 | `GET` | `/users` | 管理员 | 分页列表（`page` / `pageSize` / `keyword` / `role` / `sortBy` / `order`） |

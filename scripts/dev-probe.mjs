@@ -105,7 +105,9 @@ async function runProbe(options) {
     listeners,
     build,
     log,
-    curl: `curl -s --max-time 3 --noproxy '*' -w '\\n%{http_code}' http://localhost:${options.port}/`,
+    // 探活打公开的 /health（存活检查）：不需要登录，200 即"进程与路由活着"，
+    // 与数据库是否可用解耦（要连库一起验用 /health/ready）
+    curl: `curl -s --max-time 3 --noproxy '*' -w '\\n%{http_code}' http://localhost:${options.port}/health`,
     hint: buildHint(listening, build),
     exitCode: listening ? 0 : 1,
   };

@@ -14,7 +14,6 @@ import {
   Authenticated,
   CurrentUser,
   OwnerOrPermission,
-  Public,
   RequirePermission,
   type AuthenticatedUser,
 } from '@/common/auth/access.decorator.js';
@@ -36,7 +35,6 @@ import {
 import { queryUsersSchema, type QueryUsersDto } from './dto/query-users.dto.js';
 import { updateUserSchema, type UpdateUserDto } from './dto/update-user.dto.js';
 import {
-  healthStatusSchema,
   userPageSchema,
   userResponseSchema,
   type UserResponse,
@@ -57,7 +55,7 @@ import { UserService } from './user.service.js';
  * 幂等：`POST /users` 与 `POST /users/restore/:id` 支持 `Idempotency-Key`
  * 重放（`@Idempotent()` + 请求头双条件生效），避免网络重试建出两个用户。
  *
- * 静态段路由（health、me、by-student-no）必须声明在 `:id` 路由之前。
+ * 静态段路由（me、by-student-no、password）必须声明在 `:id` 路由之前。
  *
  * 文档：请求侧（body / query / path）由 `@ZodBody` 等装饰器自动带出，
  * 这里只需要用 `@ApiRoute` 声明"做什么 + 返回什么"（状态码由方法推导）。
@@ -66,18 +64,6 @@ import { UserService } from './user.service.js';
 @Controller('users')
 export class UserController {
   constructor(private readonly userService: UserService) {}
-
-  /** 健康检查（公开） */
-  @Public()
-  @ApiRoute({
-    summary: '健康检查',
-    description: '公开路由，不需要登录',
-    data: healthStatusSchema,
-  })
-  @Get('health')
-  health(): { status: 'ok' } {
-    return { status: 'ok' };
-  }
 
   /** 当前用户资料（登录即可） */
   @Authenticated()

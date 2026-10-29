@@ -38,8 +38,23 @@ export class DatabaseService implements OnModuleInit, OnApplicationShutdown {
     this.db = drizzle(this.pool, { schema });
   }
 
-  /** 启动时探活，连不上直接启动失败 */
+  /**
+   * 启动期探活：失败即启动失败（fail-fast）。
+   *
+   * 不在这里 catch —— 连不上库的应用起起来也只会给每个请求回 500，
+   * 不如让编排器直接看到进程崩溃并重试。
+   */
   async onModuleInit() {
+    await this.ping();
+  }
+
+  /**
+   * 单次 `SELECT 1`：启动探活与就绪检查（`modules/health`）共用。
+   *
+   * 两处的差别不在写法而在语义：启动期只证明"起得来"；运行期才回答
+   * "连接池此刻还可不可用" —— DB 重启 / 网络分区时进程照样活着，只有就绪检查能发现。
+   */
+  async ping(): Promise<void> {
     await this.pool.query('SELECT 1');
   }
 
