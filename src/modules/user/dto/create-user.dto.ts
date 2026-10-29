@@ -1,18 +1,26 @@
 import { z } from 'zod';
 
-import { ROLE_CODES } from '@/common/auth/auth.contract.js';
-import { passwordSchema, trimmedShape } from '@/shared/validation.js';
+import {
+  passwordSchema,
+  roleCodeSchema,
+  trimmed,
+  trimmedShape,
+} from '@/shared/validation.js';
 
 /** 学号基础约束（创建接口与 `:studentNo` 路径参数复用） */
 export const studentNoSchema = z.string().min(1).max(20);
 
 /**
- * 角色码枚举（创建 / 更新 / 筛选共用）。
+ * 角色码（创建 / 更新 / 筛选共用）。
  *
- * 取自 `ROLE_CODES` 而不是在这里重写一遍字面量：加角色时只改契约一处，
- * DTO 的运行时校验与 `RoleCode` 类型不会分叉。
+ * 只校验**格式**（`shared/validation/role.ts`），不校验"是否等于内置角色"：
+ * 角色是库里的数据，管理端可运行时新增，把校验钉死在 `z.enum(ROLE_CODES)`
+ * 会让新建的角色永远分配不出去。码不存在由 service 查库后抛 409
+ * （`UserService.grantRoles`），而不是在这里报 400 —— 那是数据配置问题，不是参数格式问题。
+ *
+ * 数组元素同样要 trim：`trimmedShape()` 只处理顶层字段，包不到数组元素。
  */
-export const userRoleSchema = z.enum(ROLE_CODES);
+export const userRoleSchema = trimmed(roleCodeSchema);
 
 /**
  * 用户的角色集合（多角色，权限取并集）。

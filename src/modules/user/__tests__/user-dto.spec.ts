@@ -92,9 +92,13 @@ describe('createUserSchema：文本字段规范化（无例外字段，password 
     expect(issues[0]?.message).toContain('>=1');
   });
 
-  it('roles 是数组字段 → trimmed() 原样透传，元素带空白即非法（不做元素级 trim）', () => {
+  it('roles 元素先 trim 再校验格式；格式非法仍报 roles.0', () => {
+    // 数组元素包了 trimmed()：`trimmedShape()` 只处理顶层字段，包不到元素
     expect(
-      expectFail(createUserSchema, { ...validCreate, roles: [' admin '] })[0]
+      createUserSchema.parse({ ...validCreate, roles: [' admin '] }).roles,
+    ).toEqual(['admin']);
+    expect(
+      expectFail(createUserSchema, { ...validCreate, roles: ['Admin'] })[0]
         ?.path,
     ).toBe('roles.0');
   });
@@ -223,11 +227,12 @@ describe('updateUserSchema：严格三态（省略 / 空值 / null）', () => {
   it.each([
     ['空串', { nickname: '' }],
     ['纯空白', { nickname: '   ' }],
-    ['非法角色', { roles: ['root'] }],
+    // 角色码只校验形状（小写开头、2~32 字符），"未配置"由 service 查库后答 409
+    ['非法角色码格式', { roles: ['Root'] }],
   ])('%s → 字段级 400（不再被静默吞掉后落到 refine）', (_label, input) => {
     const issues = expectFail(updateUserSchema, input);
     expect(issues.map((i) => i.path)).toContain(
-      _label === '非法角色' ? 'roles.0' : 'nickname',
+      _label === '非法角色码格式' ? 'roles.0' : 'nickname',
     );
     expect(issues.map((i) => i.message)).not.toContain('至少提供一个更新字段');
   });

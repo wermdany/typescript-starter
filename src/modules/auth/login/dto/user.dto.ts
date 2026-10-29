@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-import { ROLE_CODES } from '@/common/auth/auth.contract.js';
 import { users, type Users } from '@/database/schema/users.schema.js';
+import { roleCodeSchema } from '@/shared/validation.js';
 
 /**
  * 认证用例查询用户时使用的全量白名单（无敏感列）。
@@ -24,9 +24,9 @@ export const authUserColumns = {
 /** 认证用例里的用户记录 */
 export type AuthUser = Pick<Users, keyof typeof authUserColumns>;
 
-/** 角色码的文档 schema；取自 `ROLE_CODES`，加角色时只改契约一处 */
+/** 角色码的文档 schema：只描述形状，不枚举取值（角色是库里的数据） */
 const roleCodesSchema = z
-  .array(z.enum(ROLE_CODES))
+  .array(roleCodeSchema)
   .describe('角色码集合；按角色等级降序、角色码升序排列');
 
 /**

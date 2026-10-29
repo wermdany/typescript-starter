@@ -209,7 +209,7 @@ export const users = pgTable('users', { id: integer().primaryKey(), email: text(
 // ② src/modules/user/dto/user.dto.ts
 export const userPublicColumns = { id: users.id, email: users.email, ... } as const;   // 投影
 export type UserScalars = Pick<Users, keyof typeof userPublicColumns>;                // 类型
-export interface UserResponse extends UserScalars { roles: RoleCode[] }               // 派生字段
+export interface UserResponse extends UserScalars { roles: string[] }                  // 派生字段
 export const userResponseSchema = z
   .object({
     id: z.number().int().describe('用户 ID'),

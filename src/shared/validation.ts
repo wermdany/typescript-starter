@@ -6,6 +6,7 @@
  */
 export { trimmed, trimmedShape } from '@/shared/validation/trimmed.js';
 export { dateSchema } from '@/shared/validation/date.js';
+export { ROLE_CODE_PATTERN, roleCodeSchema } from '@/shared/validation/role.js';
 export { schemaFor } from '@/shared/validation/schema-for.js';
 export {
   LEGACY_PASSWORD_MAX_LENGTH,

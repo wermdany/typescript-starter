@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
 
-import type { RoleCode } from '@/common/auth/auth.contract.js';
 import { SessionService } from './session.service.js';
 import { TokenService } from '@/modules/auth/token/token.service.js';
 
@@ -57,7 +56,7 @@ export function createSessionAuthMiddleware(
           id: user.id,
           studentNo: user.studentNo,
           nickname: user.nickname,
-          roles: user.roles as RoleCode[],
+          roles: user.roles,
           sessionId: session.id,
         };
         await touchIfStale(deps.sessions, session.id, session.lastUsedAt);

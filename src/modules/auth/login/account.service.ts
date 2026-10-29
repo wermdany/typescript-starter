@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 
-import type { RoleCode } from '@/common/auth/auth.contract.js';
 import { DatabaseService } from '@/database/database.service.js';
 import { roles, userRoles } from '@/database/schema/rbac.schema.js';
 import { users } from '@/database/schema/users.schema.js';
@@ -18,7 +17,7 @@ export interface AccountSummary {
   id: number;
   studentNo: string;
   nickname: string;
-  roles: readonly RoleCode[];
+  roles: readonly string[];
 }
 
 /**
@@ -77,7 +76,7 @@ export class AccountService {
    * 返回的 `roles` 顺序稳定，前端不必自己排序。
    * 只统计未软删的绑定与角色行：角色被下线后，持有者下一次请求即失去该角色。
    */
-  async findRoleCodes(userId: number): Promise<RoleCode[]> {
+  async findRoleCodes(userId: number): Promise<string[]> {
     const rows = await this.database.db
       .select({ code: roles.code })
       .from(userRoles)
@@ -90,6 +89,6 @@ export class AccountService {
         ),
       )
       .orderBy(desc(roles.level), asc(roles.code));
-    return rows.map((row) => row.code as RoleCode);
+    return rows.map((row) => row.code);
   }
 }

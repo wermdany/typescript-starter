@@ -105,7 +105,9 @@ user.roles.length === 1 && user.roles[0] === 'admin'
 isAdmin(user)
 ```
 
-- `roles` 是 `readonly RoleCode[]`（多角色，权限取**并集**）；**允许空数组**，空 = 零权限 = 非管理员
+- `roles` 是 `readonly string[]`（多角色，权限取**并集**）；**允许空数组**，空 = 零权限 = 非管理员。
+  类型不是内置角色的联合：角色码是库里的数据（管理端可运行时新增），
+  要用字面量判内置角色时走 `hasRole(user, 'teacher')` —— 那个参数仍是 `RoleCode`，拼错编译报错
 - 用户→角色集合**不缓存**（改角色下一个请求即生效）；角色→权限码走一级缓存
   `Map<roleCode, Set<permissionCode>>`，TTL 由 `RBAC_CACHE_TTL_SECONDS`（默认 60）控制、single-flight 刷新
 - 🚨 `users.role` 单值列已删除，多角色走 `user_roles` 关联表。第 15.2 节第 7 条讲的 `pgEnum` 写法

@@ -6,14 +6,19 @@ import { PermissionService } from './permission.service.js';
 /**
  * RBAC 运行时模块：**权限码解析器的唯一提供处**。
  *
- * 守卫不在这里注册了 —— 登录态 / 权限码 / 归属三层判定已合并为
+ * 守卫不在这里注册 —— 登录态 / 权限码 / 归属三层判定已合并为
  * `common/auth/access.guard.ts` 的 `AccessGuard`，由 `common/http-stages.ts`
- * 统一注册。本模块退回"基础设施 provider"的单一职责：
+ * 统一注册。本模块只管"角色 → 权限码"这一件事：
  *
  * | 能力 | 提供处 |
  * | --- | --- |
  * | 放行闸门（三层合一） | `common/http-stages.ts` → `AccessGuard`（全局守卫） |
  * | 角色 → 权限码解析 | **本模块**（`PERMISSION_CHECKER` 端口） |
+ * | 角色 / 授权的管理接口 | `RbacAdminModule`（业务 API，不在这里） |
+ *
+ * **`PermissionService` 同时按类型导出，且与 `PERMISSION_CHECKER` 是同一个实例**
+ * （`useExisting` 而非 `useClass`）：管理端改完 `role_permissions` 要调
+ * `invalidate()`，若守卫拿到的是另一个实例，清掉的只是没人读的那份缓存。
  *
  * **本模块是 `@Global`**：`PERMISSION_CHECKER` 需要在 service 里做第二道防线
  * （`UserService.mayActOnOthers()`：跨用户操作的准入问权限码，不问角色）。
@@ -28,8 +33,9 @@ import { PermissionService } from './permission.service.js';
 @Module({
   providers: [
     // 权限码解析（带 Tier-1 缓存；契约在 common，实现在这里）
-    { provide: PERMISSION_CHECKER, useClass: PermissionService },
+    PermissionService,
+    { provide: PERMISSION_CHECKER, useExisting: PermissionService },
   ],
-  exports: [PERMISSION_CHECKER],
+  exports: [PermissionService, PERMISSION_CHECKER],
 })
 export class RbacModule {}

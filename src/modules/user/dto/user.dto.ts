@@ -1,9 +1,7 @@
 import { z } from 'zod';
 
-import type { RoleCode } from '@/common/auth/auth.contract.js';
 import { users, type Users } from '@/database/schema/users.schema.js';
 import { dateSchema, pageOf, schemaFor } from '@/shared/validation.js';
-import { userRoleSchema } from './create-user.dto.js';
 
 /**
  * 对外公开字段**白名单**（响应契约的唯一出处）。
@@ -46,15 +44,20 @@ export type UserScalars = Pick<Users, keyof typeof userPublicColumns>;
  * `roles` 是**派生**字段（来自 `user_roles`），与 `AuthenticatedUser.roles` 同源，
  * 客户端拿到的角色集合与鉴权时用的那一份不会有两套真相。
  * 顺序按 `roles.level` 降序、`code` 升序稳定排列。
+ *
+ * 类型是 `string[]` 而不是内置角色的字面量联合：角色码是库里的数据，
+ * 管理端新建的角色同样会出现在这里，用联合类型声明等于对调用方撒谎。
+ * 类型安全由「内置角色」这一层单独承担（`hasRole(user, 'teacher')` 的参数仍是字面量联合，
+ * 拼错会编译报错）。
  */
 export interface UserResponse extends UserScalars {
-  roles: RoleCode[];
+  roles: string[];
 }
 
 /** 把"公开列 + 角色集合"合成为响应对象 */
 export function toUserResponse(
   scalars: UserScalars,
-  roles: RoleCode[],
+  roles: string[],
 ): UserResponse {
   return { ...scalars, roles };
 }
@@ -84,7 +87,7 @@ export const userResponseSchema = schemaFor<UserResponse>()(
     createdAt: dateSchema.describe('创建时间（数据库自动填充）'),
     updatedAt: dateSchema.describe('最后修改时间（更新需应用层手动写）'),
     roles: z
-      .array(userRoleSchema)
+      .array(z.string())
       .describe('角色码集合；按角色等级降序、角色码升序稳定排列'),
   })
   .meta({ id: 'UserResponse', description: '对外用户投影' }),

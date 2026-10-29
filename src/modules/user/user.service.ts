@@ -35,7 +35,6 @@ import {
   type Actor,
   type PermissionChecker,
   type PermissionCode,
-  type RoleCode,
 } from '@/shared/auth.js';
 import { filterUpdatable, policyKeyFor } from './update-policy.js';
 import { DatabaseService, type Db } from '@/database/database.service.js';
@@ -267,7 +266,7 @@ export class UserService {
       }
       if (nextRoles) {
         // 角色集合是整体替换：先软删旧绑定再插新的，留痕可查
-        await this.replaceRoles(tx, id, nextRoles as RoleCode[]);
+        await this.replaceRoles(tx, id, nextRoles);
       }
       return updated;
     });
@@ -399,17 +398,19 @@ export class UserService {
   }
 
   /**
-   * 批量取用户角色集合并成 `userId → RoleCode[]`。
+   * 批量取用户角色集合并成 `userId → 角色码[]`。
    *
    * 一次 `IN` 查询解决整页，不做 N+1。只认**存活**绑定与**存活**角色：
    * 软删一个角色等于回收它带来的全部权限，读路径不能装作它还生效。
    * 排序与认证侧（`AccountService.findRoleCodes`）一致 —— `level` 降序、`code` 升序，
    * 保证同一用户在 `/auth/me` 与 `/users/:id` 拿到的顺序相同。
+   *
+   * 返回 `string[]` 而不是内置角色的联合类型：角色码是数据，管理端随时可能新增。
    */
   private async rolesOf(
     userIds: readonly number[],
-  ): Promise<Map<number, RoleCode[]>> {
-    const byUser = new Map<number, RoleCode[]>();
+  ): Promise<Map<number, string[]>> {
+    const byUser = new Map<number, string[]>();
     if (userIds.length === 0) {
       return byUser;
     }
@@ -428,9 +429,9 @@ export class UserService {
     for (const row of rows) {
       const list = byUser.get(row.userId);
       if (list) {
-        list.push(row.code as RoleCode);
+        list.push(row.code);
       } else {
-        byUser.set(row.userId, [row.code as RoleCode]);
+        byUser.set(row.userId, [row.code]);
       }
     }
     return byUser;
@@ -442,11 +443,14 @@ export class UserService {
    * 幂等：重复绑定同一角色不报错（命中部分唯一索引时跳过）。
    * 角色码在 `roles` 表里不存在属于数据配置问题 —— 抛 409 而不是静默跳过，
    * 否则用户会变成"零角色"，表现为登录后处处 403，排查成本极高。
+   *
+   * `codes` 是 `string[]` 而非内置角色的联合类型：角色由管理端运行时维护，
+   * 存在性只可能由这次查库回答。
    */
   private async grantRoles(
     tx: Db,
     userId: number,
-    codes: readonly RoleCode[],
+    codes: readonly string[],
     grantedBy: string,
   ): Promise<void> {
     const found = await tx
@@ -482,7 +486,7 @@ export class UserService {
   private async replaceRoles(
     tx: Db,
     userId: number,
-    codes: readonly RoleCode[],
+    codes: readonly string[],
   ): Promise<void> {
     const now = new Date();
     await tx

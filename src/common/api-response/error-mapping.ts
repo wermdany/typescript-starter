@@ -24,12 +24,13 @@ export const UNIQUE_VIOLATION_CODE = '23505';
  * 约束名片段 → 对外文案。
  *
  * 顺序即优先级（先命中先返回）：`student_no` 是列级唯一索引，
- * `email_alive_idx` 是"只对未软删行生效"的部分唯一索引（`users_email_alive_idx`）。
+ * `email_alive_idx` / `roles_code_alive_idx` 是"只对未软删行生效"的部分唯一索引。
  * 文案已是**对外契约**（客户端在按它做提示），改动视为破坏性变更。
  */
 const UNIQUE_VIOLATION_MESSAGES: ReadonlyArray<readonly [string, string]> = [
   ['student_no', '学号已存在'],
   ['email_alive_idx', '邮箱已被使用'],
+  ['roles_code_alive_idx', '角色码已存在'],
 ];
 
 /** 约束名没命中映射表时的兜底文案（不泄漏约束名） */

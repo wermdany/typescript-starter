@@ -1,9 +1,9 @@
 import { z } from 'zod';
 
-import { ROLE_CODES } from '@/common/auth/auth.contract.js';
 import {
   dateSchema,
   LEGACY_PASSWORD_MAX_LENGTH,
+  roleCodeSchema,
   trimmedShape,
 } from '@/shared/validation.js';
 
@@ -64,7 +64,7 @@ export const loginResponseSchema = z
         id: z.number().int().describe('用户 ID'),
         studentNo: z.string().describe('学号'),
         nickname: z.string().describe('昵称'),
-        roles: z.array(z.enum(ROLE_CODES)).describe('角色码集合'),
+        roles: z.array(roleCodeSchema).describe('角色码集合'),
       })
       .describe('登录后立即可用的身份字段；完整资料走 GET /users/:id'),
   })

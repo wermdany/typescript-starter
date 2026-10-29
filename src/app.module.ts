@@ -6,6 +6,7 @@ import { HttpStagesModule } from '@/common/http-stages.module.js';
 import { StorageModule } from '@/common/storage/storage.module.js';
 import { AuthModule } from '@/modules/auth/auth.module.js';
 import { FileModule } from '@/modules/file/file.module.js';
+import { RbacAdminModule } from '@/modules/rbac/rbac-admin.module.js';
 import { RbacModule } from '@/modules/rbac/rbac.module.js';
 import { UserModule } from '@/modules/user/user.module.js';
 
@@ -28,6 +29,8 @@ import { UserModule } from '@/modules/user/user.module.js';
     HttpStagesModule,
     // 权限码解析（@Global）：AccessGuard 通过 PERMISSION_CHECKER 端口注入
     RbacModule,
+    // 管理端：角色字典与授权矩阵（业务 API，摘掉这一行即可关掉管理入口）
+    RbacAdminModule,
     DatabaseModule,
     // 文件存储（@Global）：业务只注入 STORAGE 端口，实现由 storage.module.ts 一行决定
     StorageModule,

@@ -8,13 +8,15 @@ import type { Request } from 'express';
  */
 
 /**
- * 业务角色码全集（内置角色）。
+ * 内置角色码集合。
  *
- * 与 `roles.code` 一致：内置三个属于"系统角色"，运行时可再往 `roles` 表里加
- * （本常量是内置集合的编译期镜像，不约束数据表）。
+ * 与 `roles.code` 一致：内置三个属于"系统角色"（种子迁移写入、`is_system` 为真、
+ * 管理端不可删除）；管理员还可以在运行时往 `roles` 表里加角色 ——
+ * 本常量只是**内置集合的编译期镜像**，不约束数据表，也不用于请求校验。
  *
- * 之所以导出**运行时数组**而不只是类型：DTO 校验（`z.enum(ROLE_CODES)`）与
- * 类型（`RoleCode`）必须出自同一处，否则加角色时会漏改其中一边。
+ * 请求侧的角色码校验在 `shared/validation/role.ts`（只校验形状，存在性由 service 查库），
+ * 响应侧的角色集合类型是 `string[]`。本常量的用途是给 `hasRole()` / `isAdmin()`
+ * 的**参数**提供字面量联合，让"写错角色名"在编译期报错。
  */
 export const ROLE_CODES = ['student', 'teacher', 'admin'] as const;
 
@@ -37,8 +39,11 @@ export interface AuthenticatedUser {
    * - 顺序不作保证，**不要**用 `roles[0]` 当"主角色"
    * - 迁移期由 `0005` 回填保证"每个用户至少一个角色"，但代码不得依赖该假设
    *   做安全判定：空数组在 `hasRole()` 下自然为 false（fail-closed）
+   * - 类型是 `string[]`：角色由管理端运行时维护，身份里完全可能出现内置三角色之外的码。
+   *   要用字面量判角色时走 `hasRole(user, 'teacher')` —— 那个参数仍是 `RoleCode`，
+   *   拼错会在编译期报错
    */
-  roles: readonly RoleCode[];
+  roles: readonly string[];
   /** 本次请求所依据的会话 ID（登出 / 踢设备要用） */
   sessionId: number;
 }
@@ -62,7 +67,7 @@ export const TOO_MANY_ATTEMPTS_MESSAGE = '登录尝试过于频繁，请稍后�
 export const ADMIN_ROLE: RoleCode = 'admin';
 
 /** 角色集合的最小结构（只要求有 `roles`，便于纯函数复用与测试构造） */
-type RoleHolder = { roles: readonly RoleCode[] };
+type RoleHolder = { roles: readonly string[] };
 
 /**
  * 是否持有某个角色（多角色判定的**唯一**原语）。

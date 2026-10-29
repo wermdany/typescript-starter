@@ -14,9 +14,8 @@ export const WILDCARD_PERMISSION: PermissionCode = '*';
 /**
  * 权限解析的输入：只需要角色码集合。
  *
- * 刻意只声明最小形状而不直接引用 `AuthenticatedUser` —— T02 把 `role` 换成
- * `roles: readonly RoleCode[]` 之后，`AuthenticatedUser` 天然满足本接口，
- * 契约文件本身不必跟着改。
+ * 刻意只声明最小形状而不直接引用 `AuthenticatedUser` —— `AuthenticatedUser`
+ * 的 `roles: readonly string[]` 天然满足本接口，契约文件本身不必跟着改。
  */
 export interface PermissionSubject {
   readonly roles: readonly string[];
