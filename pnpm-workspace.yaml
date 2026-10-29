@@ -1,5 +1,15 @@
 # 只放"随仓库走"的 pnpm 配置。
 # 不要写 storeDir 之类的绝对路径：那是本机路径，CI（ubuntu）上会变成非法路径，
 # 让 pnpm install 在第一步就失败。需要自定义 store 请写进本地 ~/.npmrc。
+
+# 依赖的安装脚本必须逐个显式裁决（pnpm 11 起 strictDepBuilds 默认开启）：
+# 未登记的包会在 install 阶段以 ERR_PNPM_IGNORED_BUILDS 直接失败，CI 的第一条命令就是它。
+# 新增依赖后先 `pnpm ignored-builds` 看清单，再在这里写 true（需要跑）或 false（明确不跑）。
+strictDepBuilds: true
+
 allowBuilds:
+  # esbuild 的 postinstall 负责落平台二进制，不跑就没法编译/测试
   esbuild: true
+  # @scarf/scarf 是 swagger-ui-dist 带进来的安装期遥测上报（postinstall 跑 report.js），
+  # 与本项目功能无关；显式拒绝，避免"未裁决"状态
+  '@scarf/scarf': false
