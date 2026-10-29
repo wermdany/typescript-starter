@@ -100,7 +100,7 @@ export class LoginService {
     // 4. 建会话（含并发上限淘汰）+ 成功审计：同一事务，审计不会出现"有会话没记录"
     const pair = this.tokens.issue();
     const { maxSessionsPerUser } = this.config;
-    const sessionId = await this.database.transaction(async (tx) => {
+    await this.database.transaction(async (tx) => {
       const id = await this.sessions.createWithLimit(
         account.user.id,
         pair,
@@ -117,7 +117,6 @@ export class LoginService {
         },
         tx,
       );
-      return id;
     });
 
     const roles = await this.accounts.findRoleCodes(account.user.id);

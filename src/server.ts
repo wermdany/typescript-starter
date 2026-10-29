@@ -2,6 +2,10 @@ import { type INestApplication, type LoggerService } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 
 import { AppModule } from './app.module.js';
+// 副作用 import：`Request.user` 的全局类型增补必须被真实引用一次。
+// 只靠 tsconfig 全量包含生效是隐式契约 —— 一旦加了 include 白名单，
+// 或改用按可达图裁剪的打包器，`req.user` 的类型会静默变成 undefined 而不报错。
+import '@/common/auth/request-augment.js';
 import { registerRequestStages } from '@/common/http-stages.js';
 import { setupOpenApi } from '@/common/openapi/setup.js';
 import { ENV } from '@/config/config.module.js';
