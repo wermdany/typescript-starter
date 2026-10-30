@@ -82,6 +82,17 @@ export const envSchema = z.object({
   /** 连接池上限 */
   DB_POOL_MAX: z.coerce.number().int().positive().default(10),
 
+  // ─── 全局限流 ─────────────────────────────────────────────
+  /**
+   * 是否启用全局限流（按客户端 IP 计令牌，见 `common/rate-limit`）。
+   *
+   * 默认开启：它是生产环境的保护，默认关掉等于没有。
+   * 压测或批量请求的 e2e 场景在 `.env.local` 里关掉，避免把正常流量判成洪水。
+   *
+   * 只有开关在这里 —— 阈值与容量属于业务策略，见 `app-config.ts` 的 `rateLimit*`。
+   */
+  RATE_LIMIT_ENABLED: envBoolean(true),
+
   // ─── RBAC ─────────────────────────────────────────────────
   /**
    * 「角色 → 权限码」缓存（Tier-1）的有效期（秒）。

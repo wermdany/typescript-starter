@@ -21,7 +21,7 @@ import { RequestLoggingInterceptor } from '@/common/logging/request-logging.inte
  *
  * ## 分层不变式（新增 `common/*` 代码前先读这里）
  *
- * `common/{auth,api-response,validation,context,logging,idempotency,storage}/*` 允许依赖
+ * `common/{auth,api-response,validation,context,logging,idempotency,storage,rate-limit}/*` 允许依赖
  * `@nestjs/*`、express、zod、rxjs 与 Node 内置模块；
  * **禁止** import `@/modules/*`、`@/logger/*`、`@/shared/*`、`@/database/*`。
  * 理由：`common` 是被所有业务模块使用的横切层，一旦反向依赖业务代码，
@@ -48,7 +48,7 @@ import { RequestLoggingInterceptor } from '@/common/logging/request-logging.inte
  *
  * 因此本文件同时导出两半：
  * - {@link HTTP_STAGE_PROVIDERS} / {@link HTTP_STAGE_DEPENDENCIES}：能走 DI 的守卫 / 拦截器 / 过滤器
- * - {@link registerRequestStages}：只能即时挂载的 4 个中间件（顺序写死在函数体里）
+ * - {@link registerRequestStages}：只能即时挂载的 5 个中间件（顺序写死在函数体里）
  */
 
 /** 阶段名：读代码时先定位"这段逻辑在请求生命周期的哪一段" */
@@ -156,6 +156,13 @@ export interface RequestStageParts {
    * 认证实现，也不会为了一个中间件把整个 `modules/auth` 拽成 `common` 的依赖。
    */
   readonly authenticate: RequestMiddleware;
+  /**
+   * 全局限流中间件（`common/rate-limit` 的 `createRateLimitMiddleware`）。
+   *
+   * 同样以函数形式传入：阈值来自 ENV / APP_CONFIG，IP 取法来自
+   * `shared/auth/client-info`，两者 `common` 都不该直接引用 —— 由 `server.ts` 组装。
+   */
+  readonly rateLimit: RequestMiddleware;
 }
 
 /**
@@ -165,13 +172,16 @@ export interface RequestStageParts {
  *    必须早于 body parser，否则 malformed JSON 的 400 没有 traceId
  * 2. `accessLogMiddleware` —— 紧随其后：入口就要捕获 traceId（写日志时恢复上下文），
  *    且要覆盖"到不了拦截器"的 404 / 400
- * 3. `cookieParser()` —— 认证要读 refreshToken Cookie
- * 4. `authenticate` —— 最后：解析 token → `req.user`（守卫在其后读它）
+ * 3. `rateLimit` —— 在访问日志之后、认证之前：被限流的请求也要留下 access 行
+ *    （否则"用户全在报错"查不到证据），但绝不能晚于认证 —— 那时已经付出
+ *    解析 token 与查会话的成本，限流挡不住任何东西
+ * 4. `cookieParser()` —— 认证要读 refreshToken Cookie
+ * 5. `authenticate` —— 最后：解析 token → `req.user`（守卫在其后读它）
  *
  * 全部必须早于 `app.listen()`：`app.use()` 是即时挂载，晚于初始化就排不到 body parser 前面。
  *
  * @param app Nest 应用实例（尚未 listen）
- * @param parts 运行时部件（认证中间件）
+ * @param parts 运行时部件（认证中间件、限流中间件）
  */
 export function registerRequestStages(
   app: INestApplication,
@@ -179,6 +189,7 @@ export function registerRequestStages(
 ): void {
   app.use(traceContextMiddleware);
   app.use(accessLogMiddleware);
+  app.use(parts.rateLimit);
   app.use(cookieParser());
   app.use(parts.authenticate);
 }

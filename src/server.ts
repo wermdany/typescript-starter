@@ -8,9 +8,12 @@ import { AppModule } from './app.module.js';
 import '@/common/auth/request-augment.js';
 import { registerRequestStages } from '@/common/http-stages.js';
 import { setupOpenApi } from '@/common/openapi/setup.js';
+import { createRateLimitMiddleware } from '@/common/rate-limit/rate-limit.middleware.js';
+import { APP_CONFIG, type AppConfig } from '@/config/app-config.js';
 import { ENV } from '@/config/config.module.js';
 import type { Env } from '@/config/env.js';
 import { registerProcessErrorHandlers } from '@/logger/process-error.js';
+import { resolveClientIp } from '@/shared/auth/client-info.js';
 import { SessionAuthenticator } from '@/modules/auth/session/session-auth.middleware.js';
 
 /**
@@ -32,13 +35,25 @@ export async function createApp(
 ): Promise<INestApplication> {
   const app = await NestFactory.create(AppModule, { logger });
 
+  const env = app.get<Env>(ENV);
+  const appConfig = app.get<AppConfig>(APP_CONFIG);
+
   // 认证中间件从容器取出后交进去：`common/` 因此不必依赖 `modules/auth`
   const authenticator = app.get(SessionAuthenticator);
   registerRequestStages(app, {
     authenticate: (req, res, next) => void authenticator.use(req, res, next),
+    // 限流的阈值来自两份配置、键的取法来自 shared/auth —— 只有装配处同时知道它们，
+    // 因此中间件在 `common/rate-limit` 里保持"不认识 IP"的形态
+    rateLimit: createRateLimitMiddleware({
+      enabled: env.RATE_LIMIT_ENABLED,
+      capacity: appConfig.rateLimitBurst,
+      refillPerSecond: appConfig.rateLimitRefillPerSecond,
+      maxKeys: appConfig.rateLimitMaxKeys,
+      resolveKey: (req) => resolveClientIp(req, appConfig.trustProxy),
+    }),
   });
 
-  setupOpenApi(app, app.get<Env>(ENV));
+  setupOpenApi(app, env);
 
   // 进程级兜底要在 logger 接管之后注册，否则落到默认 logger
   registerProcessErrorHandlers();

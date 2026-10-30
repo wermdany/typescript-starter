@@ -46,6 +46,22 @@ export const appConfigSchema = z.object({
   /** RT 走 HttpOnly Cookie（关闭则退回 body/header 传 RT，供非浏览器客户端） */
   refreshCookieEnabled: z.boolean(),
 
+  // ─── 全局限流 ───
+  //
+  // 与「登录安全」是两层：`loginMaxAttempts` 挡撞库（按学号 + IP，查库统计），
+  // 这里挡"一个来源打爆所有接口"（按 IP 计令牌，不碰数据库）。
+  /** 令牌桶容量 = 允许的瞬时突发请求数 */
+  rateLimitBurst: z.number().int().positive(),
+  /**
+   * 每秒补充的令牌数 = 长期平均速率上限。
+   *
+   * 部署在共享出口后面（校园网 / 企业 NAT，成百上千人同一个 IP）时必须上调，
+   * 否则会把正常用户一起限掉；此时更该补一层"认证之后按用户限流"。
+   */
+  rateLimitRefillPerSecond: z.number().int().positive(),
+  /** 内存里最多保留多少个来源的桶；超出后按最久未使用淘汰 */
+  rateLimitMaxKeys: z.number().int().positive(),
+
   // ─── HTTP 幂等 ───
   //
   // 这三个键刻意**不走环境变量**：它们只影响"重复提交"这一种边缘路径，
@@ -75,6 +91,12 @@ const appConfigSource = {
 
   refreshCookieEnabled: true,
 
+  // 突发 300 次、持续 20 次/秒（≈1200 次/分钟）。取值偏宽是刻意的：
+  // 真洪水挡得住，共享出口的正常用户不至于被误伤
+  rateLimitBurst: 300,
+  rateLimitRefillPerSecond: 20,
+  rateLimitMaxKeys: 10_000,
+
   idempotencyTtlHours: 24,
   maxEntries: 1000,
   inFlightTimeoutSeconds: 30,
@@ -97,6 +119,10 @@ export const appConfig: AppConfig = appConfigSchema.parse({
   trustProxy: appConfigSource.trustProxy,
 
   refreshCookieEnabled: appConfigSource.refreshCookieEnabled,
+
+  rateLimitBurst: appConfigSource.rateLimitBurst,
+  rateLimitRefillPerSecond: appConfigSource.rateLimitRefillPerSecond,
+  rateLimitMaxKeys: appConfigSource.rateLimitMaxKeys,
 
   idempotencyTtlMs: appConfigSource.idempotencyTtlHours * HOUR_MS,
   maxEntries: appConfigSource.maxEntries,
