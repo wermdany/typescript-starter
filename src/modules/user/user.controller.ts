@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Patch,
   Post,
+  Put,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 
@@ -19,6 +20,7 @@ import {
 } from '@/common/auth/access.decorator.js';
 import { Idempotent } from '@/common/idempotency/idempotency.decorator.js';
 import { ApiRoute } from '@/common/openapi/route.decorator.js';
+import { ApiFailure } from '@/common/openapi/response.decorator.js';
 import { ZodBody, ZodParam, ZodQuery } from '@/common/validation/param.decorator.js';
 import { type PageResponse } from '@/shared/common.js';
 import {
@@ -34,6 +36,12 @@ import {
 } from './dto/params.dto.js';
 import { queryUsersSchema, type QueryUsersDto } from './dto/query-users.dto.js';
 import { updateUserSchema, type UpdateUserDto } from './dto/update-user.dto.js';
+import {
+  replaceUserRolesSchema,
+  userRoleListSchema,
+  type ReplaceUserRolesDto,
+  type UserRoleResponse,
+} from './dto/user-roles.dto.js';
 import {
   userPageSchema,
   userResponseSchema,
@@ -132,6 +140,26 @@ export class UserController {
   }
 
   /**
+   * 查询某用户的角色绑定。
+   *
+   * 与 `GET /users/:id` 的 `roles` 字段不重复：那边只给角色码（鉴权口径），
+   * 这边给角色名、等级与授权留痕（管理端渲染与审计口径）。
+   */
+  @RequirePermission('user:read')
+  @ApiRoute({
+    summary: '查询用户的角色绑定',
+    description:
+      '管理员视角；返回角色详情与授权留痕（谁在何时授予），已软删的角色不可见；用户不存在或已软删返回 404',
+    data: userRoleListSchema,
+  })
+  @Get(':id/roles')
+  findRoles(
+    @ZodParam('id', idParamSchema) id: IdParam,
+  ): Promise<UserRoleResponse[]> {
+    return this.userService.findRoles(id);
+  }
+
+  /**
    * 更新用户资料。
    *
    * - 本人：无需权限码（路由级归属判定放行），但字段仍受 `update-policy` 白名单约束
@@ -150,6 +178,35 @@ export class UserController {
     @ZodBody(updateUserSchema) dto: UpdateUserDto,
   ): Promise<UserResponse> {
     return this.userService.update(user, id, dto);
+  }
+
+  /**
+   * 整体替换用户的角色集合。
+   *
+   * 与 `PATCH /users/:id` 的 `roles` 字段等价（同一个 `replaceRoles`），
+   * 差别只在准入：这里用 `@RequirePermission` 而不是 `@OwnerOrPermission` ——
+   * 本人没有 `user:update` 就进不来，"给自己升权"在路由层就被挡住，
+   * 不必再依赖字段白名单兜底。
+   *
+   * 不提供增量（add / remove）语义：整体替换的结果可预测，
+   * 增量要先读现状再算差集，两次读之间会有并发写。
+   */
+  @RequirePermission('user:update')
+  @ApiFailure('角色码未配置', 409)
+  @ApiMessage('角色已更新')
+  @ApiRoute({
+    summary: '设置用户角色',
+    description:
+      '整体替换：请求体里的 roles 就是最终集合，至少一个角色；与管理端改资料是两条入口，便于单独审计',
+    data: userRoleListSchema,
+  })
+  @Put(':id/roles')
+  replaceRoles(
+    @CurrentUser() user: AuthenticatedUser,
+    @ZodParam('id', idParamSchema) id: IdParam,
+    @ZodBody(replaceUserRolesSchema) dto: ReplaceUserRolesDto,
+  ): Promise<UserRoleResponse[]> {
+    return this.userService.replaceUserRoles(user, id, dto);
   }
 
   /** 修改本人的密码：凭旧密码即可，改完踢掉其它设备的登录态 */

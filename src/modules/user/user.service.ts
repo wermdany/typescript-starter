@@ -30,8 +30,10 @@ import {
 import {
   FORBIDDEN_MESSAGE,
   PERMISSION_CHECKER,
+  actorIdOf,
   assertOwnership,
   holdsPermission,
+  isSystemActor,
   type Actor,
   type PermissionChecker,
   type PermissionCode,
@@ -45,6 +47,11 @@ import type { ChangePasswordDto } from './dto/change-password.dto.js';
 import type { CreateUserDto } from './dto/create-user.dto.js';
 import type { QueryUsersDto } from './dto/query-users.dto.js';
 import type { UpdateUserDto } from './dto/update-user.dto.js';
+import {
+  userRolePublicColumns,
+  type ReplaceUserRolesDto,
+  type UserRoleResponse,
+} from './dto/user-roles.dto.js';
 import {
   toUserResponse,
   userPublicColumns,
@@ -195,6 +202,85 @@ export class UserService {
     return this.findOne(userId);
   }
 
+  /**
+   * 查询某用户的角色绑定（角色详情 + 授权留痕）。
+   *
+   * 与 `UserResponse.roles` 的分工：那份只回答"鉴权用哪些码"，这份回答
+   * "这些角色叫什么、什么时候由谁给的"。管理端要渲染角色标签并支持编辑，
+   * 只有码的话还得再拉一次全量角色表自己映射。
+   *
+   * 先确认用户存活再查绑定：软删用户返回空数组会与"这个用户没有角色"
+   * 混成同一个结果，而后者本来就该被 `min(1)` 挡在写入侧。
+   */
+  async findRoles(id: number): Promise<UserRoleResponse[]> {
+    await this.assertUserAlive(id);
+    const rows = await this.db
+      .select(userRolePublicColumns)
+      .from(userRoles)
+      .innerJoin(roles, eq(roles.id, userRoles.roleId))
+      .where(
+        and(
+          eq(userRoles.userId, id),
+          isNull(userRoles.deletedAt),
+          // 软删一个角色等于回收它带来的全部权限，读路径不能装作它还生效
+          isNull(roles.deletedAt),
+        ),
+      )
+      // 与 `rolesOf` / 认证侧同序：level 降序、code 升序
+      .orderBy(desc(roles.level), asc(roles.code));
+    return [...rows];
+  }
+
+  /**
+   * 整体替换用户的角色集合（`PUT /users/:id/roles`）。
+   *
+   * 准入只有权限码（路由上的 `@RequirePermission('user:update')`），没有归属分支：
+   * 本人无此码就进不来，因此"给自己升权"在路由层已被挡住。这里刻意不用
+   * `@OwnerOrPermission` —— 那会让本人走通，再靠字段白名单兜底，多一层易漏的防线。
+   *
+   * 与 `PATCH /users/:id` 的 `roles` 字段等价（同一个 `replaceRoles`），
+   * 只是把"改授权"从"改资料"里拆出来，便于单独审计与单独收紧权限码。
+   *
+   * 事务内先确认用户存活：`replaceRoles` 的软删在用户不存在时影响 0 行，
+   * 紧接着的插入会撞外键（23503）变成 500 —— 提前给 404 更准确。
+   */
+  async replaceUserRoles(
+    actor: Actor,
+    id: number,
+    dto: ReplaceUserRolesDto,
+  ): Promise<UserRoleResponse[]> {
+    // 留痕写 `admin:<id>` / `system:internal`：这条入口是纯管理端动作，
+    // 记下具体操作者比只记权限码更有价值（授权错乱时能直接找到人）
+    const grantedBy = isSystemActor(actor)
+      ? 'system:internal'
+      : `admin:${actorIdOf(actor)}`;
+    await this.database.transaction(async (tx) => {
+      await this.assertUserAlive(id, tx);
+      // 复用唯一写入口：软删旧绑定 + 插入新绑定，同一事务
+      await this.replaceRoles(tx, id, dto.roles, grantedBy);
+    });
+    // 回读而不是拼 dto：响应里的顺序与等级必须和 GET 完全一致
+    return this.findRoles(id);
+  }
+
+  /**
+   * 用户存活断言（软删视同不存在）。
+   *
+   * 收 `executor` 是为了在事务内复用同一连接：另开一条连接看不到
+   * 当前事务里刚写入的行，判断结果会与事务内的后续写脱节。
+   */
+  private async assertUserAlive(id: number, executor?: Db): Promise<void> {
+    const db = executor ?? this.db;
+    const [row] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.id, id), isNull(users.deletedAt)))
+      .limit(1);
+    if (!row) {
+      throw new NotFoundException('用户不存在');
+    }
+  }
+
   /** 按 ID 查询详情（软删除用户不可见） */
   async findOne(id: number): Promise<UserResponse> {
     const [user] = await this.db
@@ -265,8 +351,10 @@ export class UserService {
         throw new NotFoundException('用户不存在');
       }
       if (nextRoles) {
-        // 角色集合是整体替换：先软删旧绑定再插新的，留痕可查
-        await this.replaceRoles(tx, id, nextRoles);
+        // 角色集合是整体替换：先软删旧绑定再插新的，留痕可查。
+        // `grantedBy` 记权限码：这条入口只有管理员能真正落到 roles
+        // （self 白名单不含它），"谁"由 access 日志回答
+        await this.replaceRoles(tx, id, nextRoles, 'user:update');
       }
       return updated;
     });
@@ -482,18 +570,23 @@ export class UserService {
    *
    * 不按差集增删：差集要读一遍现状再算，两次读之间可能有并发写；
    * 整体替换的语义更简单，客户端看到的结果也可预测。
+   *
+   * `grantedBy` 由调用方给出而不是内部写死：`PATCH /users/:id` 与
+   * `PUT /users/:id/roles` 是两条入口，事后要能分清这次授权来自哪一条、
+   * 以及是谁做的（`admin:<id>`）。
    */
   private async replaceRoles(
     tx: Db,
     userId: number,
     codes: readonly string[],
+    grantedBy: string,
   ): Promise<void> {
     const now = new Date();
     await tx
       .update(userRoles)
       .set({ deletedAt: now, updatedAt: now })
       .where(and(eq(userRoles.userId, userId), isNull(userRoles.deletedAt)));
-    await this.grantRoles(tx, userId, codes, 'user:update');
+    await this.grantRoles(tx, userId, codes, grantedBy);
   }
 }
 
